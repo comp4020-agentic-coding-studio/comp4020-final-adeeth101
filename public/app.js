@@ -155,18 +155,62 @@ document.addEventListener("submit", async (event) => {
 });
 
 // Other people's changes. The server already streams every change; a burst
-// of them becomes one refresh.
+// of them becomes one refresh. A refresh is scheduled 150 ms after the first
+// event and further events add nothing, so a steady stream can't postpone it
+// forever. At most one is in flight and one pending: an event that arrives
+// during a refresh queues exactly one more.
 let pending = null;
+let inFlight = false;
+let queued = false;
+const PAUSED = "Live updates paused — reconnecting…";
+let paused = false;
+
+// Written straight to the element, not through say(): this message is not the
+// save message and must not replace or clear it.
+const liveNote = () => {
+  const el = $("[data-status]");
+  if (!el) return;
+  if (paused && el.textContent.trim() === "") el.textContent = PAUSED;
+  else if (!paused && el.textContent === PAUSED) el.textContent = "";
+};
+
+function scheduleRefresh() {
+  if (pending !== null) return;
+  if (inFlight) {
+    queued = true;
+    return;
+  }
+  pending = setTimeout(async () => {
+    pending = null;
+    inFlight = true;
+    try {
+      await refresh();
+    } finally {
+      inFlight = false;
+      liveNote(); // a refresh may have swapped the element that held the note
+      if (queued) {
+        queued = false;
+        scheduleRefresh();
+      }
+    }
+  }, 150);
+}
+
 try {
   // From where the page was rendered, so a load doesn't replay old events.
   const since = Number($("[data-since]")?.dataset.since) || 0;
   const events = new EventSource("/api/events?since=" + since);
-  for (const kind of ["trace.created", "trace.updated"]) {
-    events.addEventListener(kind, () => {
-      clearTimeout(pending);
-      pending = setTimeout(refresh, 150);
-    });
+  for (const kind of ["trace.created", "trace.updated", "visitor.renamed"]) {
+    events.addEventListener(kind, scheduleRefresh);
   }
+  events.addEventListener("error", () => {
+    paused = true;
+    liveNote();
+  });
+  events.addEventListener("open", () => {
+    paused = false;
+    liveNote();
+  });
 } catch {
   /* no live updates; saving still works */
 }
