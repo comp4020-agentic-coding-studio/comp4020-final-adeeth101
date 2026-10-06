@@ -86,9 +86,21 @@ export type ActResult = { ok: true; state: State } | { ok: false; error: string;
 // with an enormous index from allocating an array the size of the machine.
 export const MAX_STEPS = 32;
 
+// The length of a new track's bar.
+export const BAR = 16;
+
 // The same shape src/pattern.ts accepts as a step, kept short enough that a
 // full bar still fits the 280-character limit on a track.
 const SOUND_NAME = /^[a-zA-Z][a-zA-Z0-9]{0,7}$/;
+
+// The kit a step cycles through: a rest, then each of these in turn.
+export const KIT = ["bd", "sd", "hh", "cp"] as const;
+
+const next = (sound: string | null): string | null => {
+  if (sound === null) return KIT[0];
+  const at = (KIT as readonly string[]).indexOf(sound);
+  return at === -1 || at === KIT.length - 1 ? null : KIT[at + 1];
+};
 
 export function act(visitor: Visitor, input: Record<string, unknown>): ActResult {
   const slot = typeof input.slot === "string" && input.slot.length > 0 ? input.slot : null;
@@ -104,23 +116,23 @@ export function act(visitor: Visitor, input: Record<string, unknown>): ActResult
 
   let body: string;
   if (input.step !== undefined) {
-    // A grid toggle: edit one step of the track's own pattern.
-    const step = input.step;
+    // A grid toggle: edit one step of the track's own pattern. A plain form
+    // post sends every field as a string, so a step of "3" is read as 3 ---
+    // that is what lets the grid work with no script at all.
+    const step = typeof input.step === "string" && /^\d{1,3}$/.test(input.step)
+      ? Number(input.step)
+      : input.step;
     if (typeof step !== "number" || !Number.isInteger(step) || step < 0 || step >= MAX_STEPS) {
       return { ok: false, error: `A step is a whole number from 0 to ${MAX_STEPS - 1}.`, status: 400 };
-    }
-
-    const sound = input.sound === null || input.sound === "" || input.sound === undefined
-      ? null
-      : input.sound;
-    if (sound !== null && (typeof sound !== "string" || !SOUND_NAME.test(sound))) {
-      return { ok: false, error: "A sound is a short name of letters and digits, like bd.", status: 400 };
     }
 
     // Hand-written code the grid can't read is never overwritten by it: the
     // grid would have to throw the code away to make room for a blank bar,
     // and the person who wrote it would find their work replaced by a click.
-    const current = existing ? parse(existing.body) : { steps: [] };
+    // In Strudel the number of steps is the length of the bar, so a new track
+    // starts as a whole bar of rests: a first click on step 12 shouldn't make
+    // a 13-step bar.
+    const current = existing ? parse(existing.body) : { steps: Array<null>(BAR).fill(null) };
     if (current === null) {
       return {
         ok: false,
@@ -131,6 +143,17 @@ export function act(visitor: Visitor, input: Record<string, unknown>): ActResult
 
     const steps = [...current.steps];
     while (steps.length <= step) steps.push(null);
+
+    // No sound given means "the next one": a step button cycles through the
+    // kit, which is what a grid with one control per step needs. A sound
+    // given (or null, for a rest) sets it outright.
+    let sound: unknown;
+    if (!("sound" in input)) sound = next(steps[step]);
+    else sound = input.sound === null || input.sound === "" ? null : input.sound;
+    if (sound !== null && (typeof sound !== "string" || !SOUND_NAME.test(sound))) {
+      return { ok: false, error: "A sound is a short name of letters and digits, like bd.", status: 400 };
+    }
+
     steps[step] = sound;
     body = print({ steps });
   } else {

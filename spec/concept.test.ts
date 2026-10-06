@@ -34,8 +34,9 @@ it("keeps the grid and the code as one thing, in both directions", async () => {
   expect((await act(me, { slot: mine, step: 0, sound: "bd" })).status).toBe(200);
   expect((await act(me, { slot: mine, step: 3, sound: "sd" })).status).toBe(200);
   let t = await track(me, mine);
-  expect(t?.body, "a toggle should rewrite the code").toBe('s("bd ~ ~ sd")');
-  expect(t?.steps).toEqual(["bd", null, null, "sd"]);
+  expect(t?.body, "a toggle should rewrite the code").toBe('s("bd ~ ~ sd ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~")');
+  expect(t?.steps?.slice(0, 4)).toEqual(["bd", null, null, "sd"]);
+  expect(t?.steps, "a new track is a whole 16-step bar").toHaveLength(16);
 
   expect((await act(me, { slot: mine, body: 's("hh hh ~ cp")' })).status).toBe(200);
   t = await track(me, mine);
@@ -64,7 +65,7 @@ it("refuses a step index that would make the server build a huge bar", async () 
   expect(res.status).toBe(400);
   expect(Date.now() - started, "refusing must be instant, not after building the array").toBeLessThan(1000);
 
-  for (const step of [-1, 1.5, "3", 32]) {
+  for (const step of [-1, 1.5, "three", "-1", 32, "32"]) {
     expect((await act(me, { slot: slot(), step, sound: "bd" })).status, `step ${String(step)}`).toBe(400);
   }
   expect((await act(me, { slot: slot(), step: 31, sound: "bd" })).status).toBe(200);
@@ -86,5 +87,23 @@ it("keeps each track its owner's", async () => {
   expect((await act(owner, { slot: theirs, step: 0, sound: "bd" })).status).toBe(200);
   expect((await act(other, { slot: theirs, step: 1, sound: "sd" })).status).toBe(403);
   expect((await act(other, { slot: theirs, body: 's("cp")' })).status).toBe(403);
-  expect((await track(owner, theirs))?.body).toBe('s("bd")');
+  expect((await track(owner, theirs))?.steps?.[0]).toBe("bd");
+});
+
+it("cycles a step through the kit when no sound is named, which is all a no-script grid can send", async () => {
+  const me = await visitor();
+  const mine = slot();
+  const seen: (string | null)[] = [];
+  for (let press = 0; press < 5; press++) {
+    // Form-encoded, as the grid's buttons post without a script.
+    const res = await fetch(new URL("/api/act", baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", cookie: me },
+      body: new URLSearchParams({ slot: mine, step: "0" }).toString(),
+      redirect: "manual",
+    });
+    expect(res.status, "a grid press should redirect like any form post").toBe(303);
+    seen.push((await track(me, mine))?.steps?.[0] ?? null);
+  }
+  expect(seen).toEqual(["bd", "sd", "hh", "cp", null]);
 });
