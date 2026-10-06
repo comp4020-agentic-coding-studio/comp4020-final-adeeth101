@@ -14,30 +14,69 @@ const $ = (selector, root = document) => root.querySelector(selector);
 
 // --- Saving without a reload -------------------------------------------
 
-const say = (message) => {
+// A failure message stays until the next action starts, and is put back
+// whenever a refresh swaps the region that holds the status element.
+let sticky = null;
+const say = (message, persistent = false) => {
+  sticky = persistent ? message : null;
   const status = $("[data-status]");
   if (status) status.textContent = message;
 };
+
+// The code editor's draft is explicit state, not a guess from focus: `baseline`
+// is the value last rendered or saved, and the editor holds a draft whenever
+// its value differs from it.
+const editor = () => document.getElementById("body");
+let baseline = editor()?.value ?? "";
+let drafting = false;
+document.addEventListener("input", (event) => {
+  if (event.target?.id !== "body") return;
+  drafting = event.target.value !== baseline;
+});
+
+// Only the latest refresh may be applied; an older response is discarded.
+let refreshes = 0;
 
 // Re-render from what the server now holds rather than guessing locally, so
 // the page always shows what the volume has. Only the two regions are
 // swapped: the sound controls, and whatever is playing, survive.
 async function refresh() {
-  const res = await fetch("/", { headers: { accept: "text/html" } });
-  if (!res.ok) return;
-  const next = new DOMParser().parseFromString(await res.text(), "text/html");
+  const mine = ++refreshes;
+  let next;
+  try {
+    const res = await fetch("/", { headers: { accept: "text/html" } });
+    if (!res.ok) return;
+    next = new DOMParser().parseFromString(await res.text(), "text/html");
+  } catch {
+    return; // offline: leave the page as it is
+  }
+  if (mine !== refreshes) return;
+
   const focused = document.activeElement;
   const keep = focused?.closest?.("[data-grid]") ? focused.getAttribute("value") : null;
-  const typing = focused?.id === "body";
+  const old = editor();
+  const typing = old !== null && focused === old;
+  const selection = typing ? [old.selectionStart, old.selectionEnd, old.selectionDirection] : null;
+  const draft = drafting && old ? old.value : null;
 
   for (const region of document.querySelectorAll("[data-region]")) {
     const name = region.getAttribute("data-region");
     const fresh = next.querySelector(`[data-region="${name}"]`);
     if (!fresh) continue;
-    // Never pull the text out from under someone mid-edit.
-    if (name === "yours" && typing) continue;
     region.replaceWith(fresh);
   }
+  const now = editor();
+  if (now) {
+    baseline = now.value;
+    if (draft !== null) {
+      now.value = draft;
+      if (typing) {
+        now.focus();
+        now.setSelectionRange(...selection);
+      }
+    }
+  }
+  if (sticky) say(sticky, true);
   if (keep !== null) $(`[data-grid] [value="${keep}"]`)?.focus();
   if (playing) play();
 }
@@ -87,22 +126,32 @@ document.addEventListener("submit", async (event) => {
   // A grid button submits its own step; FormData leaves the submitter out.
   if (form.matches("[data-grid]")) data.step = Number(event.submitter?.value);
 
-  if (form.matches("[data-compose]")) say("saving…");
+  const compose = form.matches("[data-compose]");
+  if (compose) say("saving…");
   try {
     await send(data);
-    if (form.matches("[data-compose]")) say("saved");
-    if (form.matches("[data-compose]")) document.activeElement?.blur();
-    await refresh();
   } catch (error) {
     if (error instanceof TypeError) {
-      // The network failed, not the server: hand over to the plain form
-      // post, which works without any of this.
-      say("offline — submitting the slow way");
-      form.submit();
+      // The request may or may not have been applied, so never replay it:
+      // say so, keep the draft, and show what the server actually holds.
+      say("The change may not have saved. Check the page, then try again.", true);
+      await refresh();
       return;
     }
     say(error.message);
+    return;
   }
+  if (compose) {
+    // Only the text that was sent is saved; anything typed since is still a draft.
+    const now = editor();
+    if (now && now.value === data.body) {
+      baseline = data.body;
+      drafting = false;
+    }
+    say("saved");
+    if (!drafting) document.activeElement?.blur();
+  }
+  await refresh();
 });
 
 // Other people's changes. The server already streams every change; a burst
