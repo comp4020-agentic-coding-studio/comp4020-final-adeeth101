@@ -1,0 +1,7 @@
+The most significant breakthrough occurred when I began thinking about the grid/text editor as two views of one pattern versus two synchronized representations. By doing so, I could define a clear relationship between them: code is stored as the source of truth and only generates a grid representation when the pattern adheres to a shape recognized by the grid. Code outside that shape remains text-only.
+
+That allowed me to identify a clear boundary: accessible interfaces should not simplify what can be expressed simply because they limit complexity. While this grid can aid in ease of access for beginners, it cannot represent every possible Strudel pattern.
+
+Additionally, this change influenced how I view developing a first working version of something. Persistence is more than just keeping a row in a database — a returning visitor needs to retain their relationship to that contribution. Running a server restart test helps solidify this expectation significantly more than testing that a save request succeeded.
+
+I wish to develop into a developer capable of describing both what a system ensures and what remains unverified. The current validations help establish a base of persistence and pattern mapping. However, they do not verify that the music interface will be enjoyed or easy to use by others. That will require verifying a working music experience and observing people using it.

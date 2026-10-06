@@ -10,21 +10,24 @@ rewritten by a grid that only half-understands it.
 
 ## What good means for this app
 
-> Good means democratising algorithmic music by offering a spectrum of
-> abstraction. It removes the barrier to entry by letting beginners contribute
-> through a tactile UI, while letting experts live-code text in the same shared
-> space.
+A great deal of my effort has been spent making sure that people with differing degrees of musical and programming experience have the ability to contribute to the development of the same piece. Some users will begin at a step sequencer level, see the code represented by their pattern, and then progress to text editing once they desire more creative control over their piece.
 
-That is the starting position. The evidence behind it — what live-coding tools
-like TidalCycles, Strudel, Flok, Gibber and Estuary decide about who may edit
-what, and what visual-versus-textual tools from trackers to Max/MSP to Sonic
-Pi decide about the floor and ceiling of a music tool — is in
-[`docs/research.md`](docs/research.md).
+I know that a collaborative music sequencer is not a new idea (and I bet at least a few students are doing something similar), but I think it is something students will want to use. My spin on it is to make a live GUI for Strudel, where people can interact visually with the same patterns they can edit as code. This is something I have wanted to build since taking Sound and Music Computing. I remember using Flok in that course and finding the experience terrible and I just knew we could do better. That experience is part of my motivation to make collaborative live coding more approachable.
 
-**TODO (student): sharpen this in your own words.** Say what "good" means
-*for this specific app*, not just for the genre — what trade-off you actually
-made between the grid and the text editor, what you'd point to as evidence it
-worked, and where you expect it to fall short.
+There is a common ground here (the grid and the editor) where the grid and the editor are operating on one and the same underlying pattern, instead of having each of these maintain their own separate versions of the pattern that may be out of sync. To ensure that there is a common ground here, there must be boundaries — specifically, the grid only understands a limited shape for patterns. As such, more complex code will need to be maintained as text-only and not reduced or silently modified.
+
+To evaluate if this product is "good", I will consider three things:
+
+- Can a newcomer create an audible contribution to the piece without having to learn the language?
+- Is there sufficient room for an experienced user to expand beyond the limits of the grid?
+- Do all users (newcomers and experienced users) clearly know whose contribution belongs to whom?
+
+These are objectives to test with people, not end-states defined by the current validation processes.
+
+Version One: Establishing Visitor Identity, Contributions, and Grid/Code Mapping
+Version One provides visitors with persistent identity and contributions as well as a mapping between the grid and code. Currently, the visible interface allows for text contributions, but other interfaces (sequencer controls and Strudel playback) are still being developed. Version One illustrates the foundation for persistent data and states the intent for establishing that the musical experience aligns with this definition of good.
+
+Research leading up to this design considered existing live coding environments and the relationship between accessible entryways and opportunities for more expressive use. My objective is to combine those attributes in a shared space without requiring all users to interact through the same interface.
 
 ## Running it
 

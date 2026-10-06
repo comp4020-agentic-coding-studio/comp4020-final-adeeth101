@@ -1,20 +1,11 @@
 # Process overview
 
-<!-- TEMPLATE: replace everything in this file with your own account, this
-     comment included --- `pnpm check:evidence` fails while it's still here. -->
+My response to the provided problem statement is a collaborative music environment where users can input their ideas via either a visual step sequencer or a Strudel text editor. The primary objective of this design is to provide users with a way to engage easily in order to start creating, but also to allow for more sophisticated musical expression.
 
-How you got from the brief to the harness, agentic workflow and stack behind
-this app, told however suits the work. The
-[final project brief](https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/assessments/final-project/#what-you-submit)
-says what it covers and how long it runs.
+In terms of this first version, the software utilizes Node's built-in HTTP server along with SQLite for storing visitor identity and contributions, including the code from which the grid is derived. This is to limit the size of the server so that it fits within the constraints of the provided Fly machine. In addition, persistent data will reside on the mounted volume. The server will store contributions/visitor identity and the intended audio evaluation will occur locally in each browser. The first server/storage implementation is documented in [0d50507](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/0d50507).
 
-Markers follow the links you give them; they don't trawl the repo for evidence
-you didn't point at. A link to the record is one whose text is the commit hash,
-and it can sit anywhere in a sentence:
-[`a1b2c3d`](https://github.com/YOUR-ORG/YOUR-REPO/commit/a1b2c3d) for one
-commit, or
-[`a1b2c3d...e4f5a6b`](https://github.com/YOUR-ORG/YOUR-REPO/compare/a1b2c3d...e4f5a6b)
-for a range.
+The implementation separates storage, visitor identity, and routing/interface logic from musical rule logic. The module/HTTP contract was documented in [40019b8](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/40019b8) with additional validation implemented in [3cf0498](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/3cf0498). A restart test verifies that upon returning after a server restart, a previous visitor maintains their identity/contribution across restarts: [ce24434](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/ce24434).
 
-`pnpm check:evidence` checks that this comment is gone and that every commit you
-link exists in this repo. Whether the account is any good is the marker's call.
+The primary musical design choice is to treat code as the single source of truth and to generate the grid only based on patterns understood by the grid. Any unsupported code will remain as text-only. The pattern mapping and tests are documented in [4e4a6c3](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/4e4a6c3).
+
+Currently, all local implementation checks pass; however, an audible music experience and deployed verification are required before I can confirm that the intended music interface functions correctly.
