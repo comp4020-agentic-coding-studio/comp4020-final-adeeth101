@@ -61,6 +61,14 @@ const readonlyGrid = (steps: (string | null)[]): string =>
     .map((sound) => `<span class="step${sound ? ` step--${escape(sound)}` : ""}">${sound ? escape(sound) : "·"}</span>`)
     .join("")}</p>`;
 
+// A note from the first version, when a visitor could only leave text. Shown
+// as what it is: words, not a track, and nothing that could play.
+const oldNote = (trace: Trace): string => `<li class="trace trace--note">
+  <p class="trace__by">${escape(trace.handle)}${trace.mine ? " <span>(you)</span>" : ""}
+    <time datetime="${when(trace.updated_at)}">${when(trace.updated_at).slice(0, 16).replace("T", " ")}</time></p>
+  <p class="trace__body">${escape(trace.body)}</p>
+</li>`;
+
 function track(trace: Trace): string {
   const kind = trace.editable ? "pattern" : "code";
   const note = trace.editable
@@ -86,8 +94,13 @@ export function page(state: State, notice?: string, draft?: string): string {
   const handWritten = mine !== undefined && !mine.editable;
   const code = draft ?? mine?.body ?? "";
 
-  const tracks = state.traces.map(track).join("\n");
-  const count = state.traces.length;
+  // A track has a slot; a trace without one is a note left before the
+  // instrument existed. Notes are kept --- they are someone's words --- but
+  // they are not tracks: they don't count, they never play, and the page
+  // doesn't describe them as code.
+  const tracks = state.traces.filter((t) => t.slot).map(track).join("\n");
+  const count = state.traces.filter((t) => t.slot).length;
+  const notes = state.traces.filter((t) => !t.slot);
 
   return shell(
     "A shared Strudel space",
@@ -145,6 +158,16 @@ export function page(state: State, notice?: string, draft?: string): string {
     <ul class="traces" data-traces>
 ${tracks || '    <li class="empty">Nobody has made a track yet. Yours would be the first.</li>'}
     </ul>
+    ${
+      notes.length === 0
+        ? ""
+        : `<details class="notes">
+      <summary>${notes.length} ${notes.length === 1 ? "note" : "notes"} left before the instrument</summary>
+      <ul class="traces">
+${notes.map(oldNote).join("\n")}
+      </ul>
+    </details>`
+    }
   </section>
 </main>
 
