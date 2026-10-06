@@ -134,9 +134,14 @@ export function page(state: State, notice?: string, draft?: string): string {
       handWritten
         ? `<p class="hint">Your track is code the grid can't read, so the grid stays out of its way.
       Write a pattern like <code>s("bd ~ sd ~")</code> to get the grid back.</p>`
-        : `<p class="hint">Press a step to cycle it through kick, snare, hat, clap and rest.
-      The code below changes with it.</p>
-    ${grid(slot, mine?.steps ?? [])}`
+        : `<p class="hint">Pressing a step saves straight away and rewrites the code below; each press
+      moves that step to the next sound. Edit the code yourself and press "Save code".
+      "Play" makes this browser play everyone's patterns.</p>
+    ${grid(slot, mine?.steps ?? [])}
+    <p class="legend" aria-hidden="true"><span class="swatch swatch--bd">bd</span> kick
+      <span class="swatch swatch--sd">sd</span> snare <span class="swatch swatch--hh">hh</span> hat
+      <span class="swatch swatch--cp">cp</span> clap <span class="swatch">·</span> rest
+      <span class="legend__note">One sound per step.</span></p>`
     }
 
     <form class="compose" method="post" action="/api/act" data-compose>

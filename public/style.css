@@ -229,3 +229,14 @@ textarea#body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, mono
 .notes summary { cursor: pointer; color: var(--dim); font-size: 0.875rem; min-height: 2.75rem; display: flex; align-items: center; }
 .notes .traces { margin-top: 0.5rem; }
 .trace--note p.trace__body { margin: 0.25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The kit, spelt out once beside the grid: same colours as the steps, and
+   the name always as text, so colour is never the only signal. Its own
+   class, not .step, so nothing here inherits a step button's sizing. */
+.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; margin: 0 0 0.75rem; font-size: 0.8125rem; color: var(--dim); }
+.swatch { display: inline-grid; place-items: center; min-width: 1.75rem; height: 1.25rem; padding: 0 0.25rem; border-radius: 0.25rem; background: var(--step); border: 1px solid var(--line); font: 600 0.6875rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.swatch--bd { background: var(--bd); border-color: var(--bd); color: #fff; }
+.swatch--sd { background: var(--sd); border-color: var(--sd); color: #fff; }
+.swatch--hh { background: var(--hh); border-color: var(--hh); color: #fff; }
+.swatch--cp { background: var(--cp); border-color: var(--cp); color: #fff; }
+.legend__note { flex-basis: 100%; }
