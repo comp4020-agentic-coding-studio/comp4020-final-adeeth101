@@ -11,6 +11,7 @@
 import { db, now } from "./db.ts";
 import { record } from "./events.ts";
 import type { Visitor } from "./identity.ts";
+import { parse, print, type Pattern } from "./pattern.ts";
 
 export type Trace = {
   id: number;
@@ -21,6 +22,12 @@ export type Trace = {
   created_at: number;
   updated_at: number;
   mine?: boolean;
+  // The grid is a view over `body`, not a second source of truth --- see
+  // src/pattern.ts. `steps` is null, and `editable` false, whenever `body`
+  // falls outside the one subset the grid understands. The page shows the
+  // code with no grid in that case; it never rewrites someone's text.
+  editable: boolean;
+  steps: Pattern["steps"] | null;
 };
 
 export type State = {
@@ -37,18 +44,27 @@ const listTraces = db.prepare(
     order by t.updated_at desc
     limit 200`,
 );
-const mineInSlot = db.prepare("select id from trace where visitor_id = ? and slot is ?");
+const mineInSlot = db.prepare(
+  "select id, body from trace where visitor_id = ? and slot is ?",
+);
+const ownerOfSlot = db.prepare(
+  "select visitor_id from trace where slot = ? and slot is not null limit 1",
+);
 const insertTrace = db.prepare(
   `insert into trace (visitor_id, slot, body, created_at, updated_at)
    values (?, ?, ?, ?, ?) returning id`,
 );
 const updateTrace = db.prepare("update trace set body = ?, updated_at = ? where id = ?");
 
+function withPattern(trace: Trace): Trace {
+  const pattern = parse(trace.body);
+  return { ...trace, editable: pattern !== null, steps: pattern?.steps ?? null };
+}
+
 export function state(visitor: Visitor): State {
-  const traces = (listTraces.all() as unknown as Trace[]).map((trace) => ({
-    ...trace,
-    mine: trace.visitor_id === visitor.id,
-  }));
+  const traces = (listTraces.all() as unknown as Trace[]).map((trace) =>
+    withPattern({ ...trace, mine: trace.visitor_id === visitor.id }),
+  );
   return {
     you: { id: visitor.id, handle: visitor.handle },
     traces,
@@ -62,15 +78,41 @@ export function state(visitor: Visitor): State {
 // never your own line) is refused here.
 export type ActResult = { ok: true; state: State } | { ok: false; error: string; status: number };
 
+// One track per visitor: a named slot is a track, and only the visitor who
+// already owns it may write to it again. A slot of null is the pre-concept
+// shared scratch space and keeps its old, unowned behaviour untouched ---
+// nothing in docs/contract.md names a track yet, so that path stays as it was.
 export function act(visitor: Visitor, input: Record<string, unknown>): ActResult {
-  const body = typeof input.body === "string" ? input.body.trim() : "";
+  const slot = typeof input.slot === "string" && input.slot.length > 0 ? input.slot : null;
+
+  if (slot !== null) {
+    const owner = ownerOfSlot.get(slot) as { visitor_id: string } | undefined;
+    if (owner && owner.visitor_id !== visitor.id) {
+      return { ok: false, error: "That track belongs to someone else.", status: 403 };
+    }
+  }
+
+  const existing = mineInSlot.get(visitor.id, slot) as { id: number; body: string } | undefined;
+
+  let body: string;
+  if (typeof input.step === "number" && Number.isInteger(input.step) && input.step >= 0) {
+    // A grid toggle: edit one step of the track's own pattern, leaving the
+    // rest of the code string untouched. Starts from a blank bar if the
+    // track doesn't exist yet, or its code isn't in the grid's subset.
+    const current = parse(existing?.body ?? "") ?? { steps: [] };
+    const steps = [...current.steps];
+    while (steps.length <= input.step) steps.push(null);
+    const sound = typeof input.sound === "string" && input.sound.length > 0 ? input.sound : null;
+    steps[input.step] = sound;
+    body = print({ steps });
+  } else {
+    body = typeof input.body === "string" ? input.body.trim() : "";
+  }
+
   if (body.length === 0) return { ok: false, error: "Write something first.", status: 400 };
   if (body.length > 280) {
     return { ok: false, error: "Keep it under 280 characters.", status: 400 };
   }
-
-  const slot = typeof input.slot === "string" && input.slot.length > 0 ? input.slot : null;
-  const existing = mineInSlot.get(visitor.id, slot) as { id: number } | undefined;
 
   if (existing) {
     updateTrace.run(body, now(), existing.id);
