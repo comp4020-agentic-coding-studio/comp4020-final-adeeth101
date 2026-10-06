@@ -184,7 +184,11 @@ it("marks exactly the caller's own traces as mine in /api/state", async () => {
 // --- 4. /readme/ reflects an edit without a restart -------------------------
 // (heading order & presence is invariants.test.ts's job; this proves liveness)
 
-it("reflects the current README.md content, read per request rather than cached", async () => {
+// Only meaningful when the app reads this checkout's README.md --- `pnpm dev`
+// on a laptop. In CI the app is the built image, which carries its own copy
+// of README.md: editing the runner's file can't reach it, and a redeploy is
+// what changes the served README there. GitHub Actions sets CI=true.
+it.skipIf(process.env.CI === "true")("reflects the current README.md content, read per request rather than cached", async () => {
   const fs = await import("node:fs/promises");
   const original = await fs.readFile("README.md", "utf8");
   const marker = `live-reload-probe-${Date.now()}`;
