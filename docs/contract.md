@@ -111,5 +111,5 @@ pnpm check      # typecheck, then every spec against a running app
 `spec/persistence.test.ts` is the exception: it starts and kills its own server
 on a spare port, because the only way to test a restart is to perform one.
 
-Working in parallel, set `PORT`, `APP_URL` and `DB_PATH` per worktree so two
-checks never fight over a port or a database.
+To run a second copy alongside the first, give it its own `PORT`, `APP_URL`
+and `DB_PATH`, so two checks never fight over a port or a database.

@@ -32,7 +32,6 @@ Research leading up to this design considered existing live coding environments 
 ## Running it
 
 ```
-set -a; . ./.env.stream; set +a
 mise exec -- pnpm dev       # with a reload, on 8080, database in .data/
 mise exec -- pnpm start     # as the container runs it
 mise exec -- pnpm check     # typecheck, then every spec against a running app
