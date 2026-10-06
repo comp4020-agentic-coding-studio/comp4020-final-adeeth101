@@ -9,7 +9,7 @@
 // there"), which means the deploy can be proved end to end before the concept
 // is finished, and a half-built idea can never leave the app dead.
 import { db, now } from "./db.ts";
-import { record } from "./events.ts";
+import { latestEventId, record } from "./events.ts";
 import type { Visitor } from "./identity.ts";
 import { parse, print, type Pattern } from "./pattern.ts";
 
@@ -68,7 +68,7 @@ export function state(visitor: Visitor): State {
   return {
     you: { id: visitor.id, handle: visitor.handle },
     traces,
-    meta: { count: traces.length },
+    meta: { count: traces.length, latestEvent: latestEventId() },
   };
 }
 

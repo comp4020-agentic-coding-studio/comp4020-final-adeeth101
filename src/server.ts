@@ -141,9 +141,18 @@ const server = createServer(async (req, res) => {
 
     if (path === "/api/handle" && method === "POST") {
       const handle = cleanHandle((await readJson(req)).handle);
-      if (!handle) return json(res, 400, { error: "A name needs at least one character." });
+      if (!handle) {
+        const error = "A name needs at least one character.";
+        return wantsHtml(req)
+          ? html(res, 400, page(state(visitor), error), cookie(visitor))
+          : json(res, 400, { error });
+      }
       rename(visitor, handle);
       record(visitor.id, "visitor.renamed", { handle });
+      if (wantsHtml(req)) {
+        res.writeHead(303, { location: "/", ...cookie(visitor) });
+        return res.end();
+      }
       return json(res, 200, { ...visitor, handle }, cookie(visitor));
     }
 

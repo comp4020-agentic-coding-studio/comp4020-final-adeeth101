@@ -38,8 +38,20 @@ function parseCookies(header: string | undefined): Map<string, string> {
 
 // Handles are shown next to other people's work, so they're short, plain, and
 // never empty --- an unnamed visitor gets a readable fallback, not a blank.
-const ADJECTIVES = ["quiet", "slow", "far", "late", "near", "dim", "odd", "spare"];
-const NOUNS = ["lamp", "tide", "stair", "field", "wire", "glass", "path", "bell"];
+// 32 x 32 names. A crit room holds twenty-odd people, and with the 64 names
+// this list started with, two of them sharing one was more likely than not.
+const ADJECTIVES = [
+  "quiet", "slow", "far", "late", "near", "dim", "odd", "spare",
+  "bright", "low", "warm", "cold", "soft", "loud", "brief", "deep",
+  "faint", "loose", "plain", "quick", "round", "sharp", "still", "thin",
+  "wide", "wild", "young", "pale", "blue", "green", "amber", "grey",
+];
+const NOUNS = [
+  "lamp", "tide", "stair", "field", "wire", "glass", "path", "bell",
+  "drum", "reed", "string", "horn", "loop", "beat", "chord", "echo",
+  "fern", "moth", "kite", "stone", "river", "cloud", "ember", "harbour",
+  "orbit", "pulse", "signal", "valley", "willow", "comet", "lantern", "meadow",
+];
 
 // Derived from the id rather than drawn at random, so a visitor who hasn't
 // written anything yet --- and so has no row to keep a handle in --- still

@@ -48,6 +48,13 @@ export function record(
 
 export const since = (id: number): Event[] => sinceEvents.all(id) as Event[];
 
+const newest = db.prepare("select coalesce(max(id), 0) as id from event");
+
+// The id a page was rendered at. A browser that opens the stream from here
+// gets only what changed after it loaded, rather than a replay of history it
+// already has on screen.
+export const latestEventId = (): number => (newest.get() as { id: number }).id;
+
 // Server-sent events: one long-lived GET, no protocol upgrade, and it survives
 // Fly's proxy without extra configuration. `Last-Event-ID` lets a reconnecting
 // browser replay what it missed, which is why the log is the source.
