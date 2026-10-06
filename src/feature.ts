@@ -38,10 +38,13 @@ export type State = {
   meta: Record<string, unknown>;
 };
 
+// Newest track first, by when it was started, not last changed: ordering by
+// the last change moved a track to the top on every press, so following one
+// collaborator meant chasing them around the room.
 const listTraces = db.prepare(
   `select t.id, t.visitor_id, t.slot, t.body, t.created_at, t.updated_at, v.handle
      from trace t join visitor v on v.id = t.visitor_id
-    order by t.updated_at desc
+    order by t.created_at desc, t.id desc
     limit 200`,
 );
 const mineInSlot = db.prepare(
