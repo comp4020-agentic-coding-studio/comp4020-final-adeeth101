@@ -85,7 +85,9 @@ document.addEventListener("submit", async (event) => {
 // of them becomes one refresh.
 let pending = null;
 try {
-  const events = new EventSource("/api/events");
+  // From where the page was rendered, so a load doesn't replay old events.
+  const since = Number($("[data-since]")?.dataset.since) || 0;
+  const events = new EventSource("/api/events?since=" + since);
   for (const kind of ["trace.created", "trace.updated"]) {
     events.addEventListener(kind, () => {
       clearTimeout(pending);

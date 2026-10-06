@@ -97,7 +97,7 @@ export function page(state: State, notice?: string, draft?: string): string {
   <nav><a href="/readme/">What good means</a></nav>
 </header>
 
-<main id="main">
+<main id="main" data-since="${Number(state.meta.latestEvent) || 0}">
   ${notice ? `<p class="notice" role="status">${escape(notice)}</p>` : ""}
 
   <!-- Sound needs a script, so the controls for it arrive with one. -->
