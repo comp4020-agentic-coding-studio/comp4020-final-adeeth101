@@ -240,3 +240,17 @@ textarea#body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, mono
 .swatch--hh { background: var(--hh); border-color: var(--hh); color: #fff; }
 .swatch--cp { background: var(--cp); border-color: var(--cp); color: #fff; }
 .legend__note { flex-basis: 100%; }
+
+/* Step numbers, drawn inside each of your own step buttons by a counter, so
+   they can't drift from the button they name at any width. The buttons'
+   aria-labels already say "Step n", so screen readers take that, not this. */
+[data-grid] { counter-reset: step; }
+[data-grid] .step { counter-increment: step; position: relative; }
+[data-grid] .step::before {
+  content: counter(step);
+  position: absolute;
+  top: 0.125rem;
+  left: 0.1875rem;
+  font: 500 0.5625rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  opacity: 0.6;
+}
