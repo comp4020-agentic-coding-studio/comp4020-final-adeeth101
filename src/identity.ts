@@ -41,10 +41,13 @@ function parseCookies(header: string | undefined): Map<string, string> {
 const ADJECTIVES = ["quiet", "slow", "far", "late", "near", "dim", "odd", "spare"];
 const NOUNS = ["lamp", "tide", "stair", "field", "wire", "glass", "path", "bell"];
 
-const suggestHandle = (): string =>
-  `${ADJECTIVES[Math.floor(Math.random() * ADJECTIVES.length)]} ${
-    NOUNS[Math.floor(Math.random() * NOUNS.length)]
-  }`;
+// Derived from the id rather than drawn at random, so a visitor who hasn't
+// written anything yet --- and so has no row to keep a handle in --- still
+// sees the same name on every page load.
+const suggestHandle = (id: string): string => {
+  const digest = createHmac("sha256", "handle").update(id).digest();
+  return `${ADJECTIVES[digest[0] % ADJECTIVES.length]} ${NOUNS[digest[1] % NOUNS.length]}`;
+};
 
 export const cleanHandle = (raw: unknown): string | null => {
   if (typeof raw !== "string") return null;
@@ -54,13 +57,16 @@ export const cleanHandle = (raw: unknown): string | null => {
 
 const selectVisitor = db.prepare("select id, handle from visitor where id = ?");
 const insertVisitor = db.prepare(
-  "insert into visitor (id, handle, created_at, last_seen_at) values (?, ?, ?, ?)",
+  "insert or ignore into visitor (id, handle, created_at, last_seen_at) values (?, ?, ?, ?)",
 );
 const touchVisitor = db.prepare("update visitor set last_seen_at = ? where id = ?");
 const renameVisitor = db.prepare("update visitor set handle = ? where id = ?");
 
-// Resolves the visitor for a request, creating one if this browser is new.
-// `fresh` tells the caller to send the cookie back.
+// Resolves the visitor for a request without writing anything. A browser that
+// only looks --- a crawler, an uptime check, someone who leaves straight away
+// --- never sends the cookie back, so creating a row per look would fill the
+// table with people who were never there. The row is made by persist(), on
+// the first write. `fresh` tells the caller to send the cookie.
 export function identify(cookieHeader: string | undefined): Visitor {
   const raw = parseCookies(cookieHeader).get(COOKIE);
   const id = raw ? verify(raw) : null;
@@ -71,20 +77,23 @@ export function identify(cookieHeader: string | undefined): Visitor {
       touchVisitor.run(now(), id);
       return { id: row.id, handle: row.handle, fresh: false };
     }
-    // Signed cookie for a visitor the volume no longer has: trust the id and
-    // rebuild the row, so a wiped database doesn't orphan a returning browser.
-    const handle = suggestHandle();
-    insertVisitor.run(id, handle, now(), now());
-    return { id, handle, fresh: false };
+    // Signed, but not yet written anything (or the volume was wiped): trust
+    // the id, so a returning browser keeps it.
+    return { id, handle: suggestHandle(id), fresh: false };
   }
 
   const made = randomUUID();
-  const handle = suggestHandle();
-  insertVisitor.run(made, handle, now(), now());
-  return { id: made, handle, fresh: true };
+  return { id: made, handle: suggestHandle(made), fresh: true };
+}
+
+// Makes the visitor real before their first write. Safe to call on every
+// write: a visitor who already has a row is left alone.
+export function persist(visitor: Visitor): void {
+  insertVisitor.run(visitor.id, visitor.handle, now(), now());
 }
 
 export function rename(visitor: Visitor, handle: string): void {
+  persist(visitor);
   renameVisitor.run(handle, visitor.id);
 }
 

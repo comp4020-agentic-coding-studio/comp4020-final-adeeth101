@@ -7,7 +7,7 @@ import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { render } from "./markdown.ts";
-import { cleanHandle, cookieHeader, identify, rename, type Visitor } from "./identity.ts";
+import { cleanHandle, cookieHeader, identify, persist, rename, type Visitor } from "./identity.ts";
 import { act, state } from "./feature.ts";
 import { record, stream } from "./events.ts";
 import { page, readmePage } from "./page.ts";
@@ -124,7 +124,6 @@ const server = createServer(async (req, res) => {
     const visitor = identify(req.headers.cookie);
 
     if (path === "/") {
-      if (visitor.fresh) record(visitor.id, "visitor.arrived", {});
       return html(res, 200, page(state(visitor)), cookie(visitor));
     }
 
@@ -149,7 +148,9 @@ const server = createServer(async (req, res) => {
     }
 
     if (path === "/api/act" && method === "POST") {
-      const result = act(visitor, await readJson(req));
+      const input = await readJson(req);
+      persist(visitor);
+      const result = act(visitor, input);
       if (wantsHtml(req)) {
         if (result.ok) {
           res.writeHead(303, { location: "/", ...cookie(visitor) });

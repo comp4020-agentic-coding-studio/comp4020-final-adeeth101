@@ -113,3 +113,34 @@ it("tells two visitors apart and shows each only their own as theirs", async () 
   expect(mine).toContain("written by the first visitor");
   expect(mine).not.toContain("written by the second visitor");
 });
+
+// The flip side of remembering people: not inventing them. A crawler or an
+// uptime check never sends the cookie back, so a visitor row per look would
+// fill the table with people who were never there. Only a write makes one.
+it("writes nothing for a visitor who only looks", async () => {
+  if (!server) await boot();
+  const { DatabaseSync } = await import("node:sqlite");
+  const visitors = (): number => {
+    const db = new DatabaseSync(DB_PATH, { readOnly: true });
+    try {
+      return (db.prepare("select count(*) as n from visitor").get() as { n: number }).n;
+    } finally {
+      db.close();
+    }
+  };
+
+  const before = visitors();
+  for (let look = 0; look < 10; look++) {
+    await fetch(`${base}/`);
+    await fetch(`${base}/api/state`);
+  }
+  expect(visitors(), "looking without writing created visitor rows").toBe(before);
+
+  const wrote = await fetch(`${base}/api/act`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ body: "now I exist" }),
+  });
+  expect(wrote.status).toBe(200);
+  expect(visitors(), "a first write should create exactly one visitor").toBe(before + 1);
+});

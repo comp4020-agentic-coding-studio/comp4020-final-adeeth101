@@ -65,13 +65,25 @@ it and week 11's instruments read it, so a gap in it is a gap in both.
 | `POST /api/handle` | `{handle}` |
 | `GET /api/events` | SSE; honours `Last-Event-ID` |
 
-Two rules hold across all of them:
+**Who a visitor is.** Every response to a new browser sets a signed `visitor`
+cookie, but nothing is written until that visitor first writes something
+(`POST /api/act` or `/api/handle`). Before then they are real enough to be
+shown a stable handle, derived from their id, and the state as everyone else
+sees it, with nothing marked `mine`. A request with no cookie is simply that: a
+new visitor who hasn't written anything yet. So `GET /api/state` without a
+cookie answers 200 with the shared state, rather than refusing. Crawlers and
+uptime checks never send the cookie back; creating a row for each of them
+would fill the table with people who were never there.
+
+Three rules hold across all of them:
 
 - **`POST /api/act` answers a form post with a 303 to `/`, and a fetch with
   JSON.** The page works with no JavaScript at all, and `public/app.js` only
   avoids the reload. A change that breaks the plain form post breaks the app on
   a slow or hostile connection, which is the band the brief calls "use it
   wasn't designed for".
+- **Looking writes nothing.** Only a write creates a visitor row or appends to
+  the event log. `spec/persistence.test.ts` holds this.
 - **A refused action is not an error.** `act()` returns `{ok:false, error,
   status}` and the person is shown `error`. The rule a concept enforces is
   refused here, in one place, and shown rather than swallowed.
