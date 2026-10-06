@@ -19,9 +19,14 @@ ENV NODE_ENV=production
 ENV PORT=8080
 EXPOSE 8080
 
-# Not root, so a bug in the app can't rewrite the image. The volume at /data
-# has to be writable by this user, hence the chown.
-RUN mkdir -p /data && chown -R node:node /data /app
-USER node
+# The app runs as the unprivileged node user, so a bug in it can't rewrite
+# the image. But /data is mounted at run time, over whatever the image put
+# there --- a Fly volume, or the tmpfs CI starts the container with --- and a
+# fresh mount belongs to root. Chowning it at build time does nothing for
+# that, and the app then can't open its database at all. So the container
+# starts as root only long enough to hand /data to node, and su-exec replaces
+# itself with the app rather than staying in between: node is the process
+# that receives Fly's stop signal.
+RUN apk add --no-cache su-exec && mkdir -p /data && chown -R node:node /data /app
 
-CMD ["node", "src/server.ts"]
+CMD ["sh", "-c", "chown node:node /data && exec su-exec node node src/server.ts"]
