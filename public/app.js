@@ -187,6 +187,18 @@ let playing = false;
 let run = 0; // bumped by every start, stop and evaluation; an older one gives up
 let strudel = null;
 let loading = null;
+let evalError = null;
+
+// Strudel catches its own evaluation errors: evaluate() resolves as if all
+// were well and hands the error to onEvalError instead. Checked in a browser
+// against @strudel/web 1.3.0 with a broken pattern. This turns that back into
+// a rejection, so one track's broken code can't leave the status saying the
+// room is playing while nothing does.
+async function evaluate(code) {
+  evalError = null;
+  await strudel.evaluate(code);
+  if (evalError) throw evalError;
+}
 
 function setState(next, message) {
   state = next;
@@ -218,7 +230,12 @@ function load() {
     script.onload = async () => {
       try {
         const api = window.strudel;
-        await window.initStrudel({ prebake: () => api.samples(SAMPLES) });
+        await window.initStrudel({
+          prebake: () => api.samples(SAMPLES),
+          onEvalError: (error) => {
+            evalError = error;
+          },
+        });
         if (!done) strudel = api;
         finish(resolve, api);
       } catch (error) {
@@ -263,7 +280,7 @@ async function play(mine = ++run) {
     return;
   }
   try {
-    await strudel.evaluate(`stack(${codes.join(",\n")})`);
+    await evaluate(`stack(${codes.join(",\n")})`);
   } catch (error) {
     if (mine !== run) return;
     // One person's broken code shouldn't silence the room: fall back to the
@@ -274,7 +291,7 @@ async function play(mine = ++run) {
     let fellBack = false;
     if (safe.length > 0) {
       try {
-        await strudel.evaluate(`stack(${safe.join(",\n")})`);
+        await evaluate(`stack(${safe.join(",\n")})`);
         fellBack = true;
       } catch {
         /* nothing to fall back to */
