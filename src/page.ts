@@ -4,6 +4,7 @@
 // reload mid-action --- the "holds up under use it wasn't designed for" band.
 // public/app.js adds sound and saves without a reload; it is never required.
 import type { State, Trace } from "./feature.ts";
+import { trackOf } from "./identity.ts";
 
 const escape = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -29,10 +30,6 @@ const when = (at: number): string => new Date(at).toISOString();
 const NAMES: Record<string, string> = { bd: "kick", sd: "snare", hh: "hat", cp: "clap" };
 const named = (sound: string | null): string => (sound === null ? "rest" : NAMES[sound] ?? sound);
 
-// Each visitor has one track, addressed by their id rather than their handle:
-// handles are short and can repeat, and two people called "odd glass" must
-// not end up fighting over one track.
-export const trackOf = (visitorId: string): string => `t-${visitorId.slice(0, 12)}`;
 
 const BAR = 16;
 
@@ -76,7 +73,7 @@ function track(trace: Trace): string {
     : `<p class="trace__note">${
         trace.mine
           ? "Hand-written code, so it's edited as text."
-          : "Hand-written code. It plays only if you allow other people's code below."
+          : "Hand-written code. It isn't played here, since it would run as code in your browser."
       }</p>`;
   return `<li class="trace${trace.mine ? " trace--mine" : ""}" data-slot="${escape(trace.slot ?? "")}"
     data-kind="${kind}" data-mine="${trace.mine ? "true" : "false"}">
@@ -125,8 +122,9 @@ export function page(state: State, notice?: string, draft?: string): string {
   <!-- Sound needs a script, so the controls for it arrive with one. -->
   <section class="transport" data-transport hidden aria-label="Sound">
     <button type="button" data-play aria-pressed="false">Play</button>
-    <span class="transport__opt"><input type="checkbox" id="others" data-others>
-      <label for="others">Also play other people's hand-written code</label></span>
+    <p class="transport__opt">Plays every grid pattern in the room, and your own code.
+      Other people's hand-written code isn't played: Strudel runs it as code in
+      your browser, and this space can't yet keep that safe.</p>
     <p class="transport__status" data-audio-status aria-live="polite">Sound loads when you press play.</p>
   </section>
 
