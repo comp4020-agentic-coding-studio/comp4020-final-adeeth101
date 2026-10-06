@@ -194,12 +194,23 @@ export function act(visitor: Visitor, input: Record<string, unknown>): ActResult
     return { ok: false, error: "Keep it under 280 characters.", status: 400 };
   }
 
-  if (existing) {
-    updateTrace.run(body, now(), existing.id);
-    record(visitor.id, "trace.updated", { id: existing.id, slot, body });
-  } else {
-    const { id } = insertTrace.get(visitor.id, slot, body, now(), now()) as { id: number };
-    record(visitor.id, "trace.created", { id, slot, body });
+  // The change and the event that announces it land together or not at all:
+  // a track that changed without its event would never reach anyone's open
+  // page, and an event for a change that didn't happen would refresh to
+  // nothing.
+  db.exec("begin");
+  try {
+    if (existing) {
+      updateTrace.run(body, now(), existing.id);
+      record(visitor.id, "trace.updated", { id: existing.id, slot, body });
+    } else {
+      const { id } = insertTrace.get(visitor.id, slot, body, now(), now()) as { id: number };
+      record(visitor.id, "trace.created", { id, slot, body });
+    }
+    db.exec("commit");
+  } catch (error) {
+    db.exec("rollback");
+    throw error;
   }
 
   return { ok: true, state: state(visitor) };
