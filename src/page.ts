@@ -94,10 +94,19 @@ export function page(state: State, notice?: string, draft?: string): string {
     `<header class="bar">
   <h1>A shared Strudel space</h1>
   <p class="bar__you">you are <strong data-handle>${escape(state.you.handle)}</strong></p>
+  <details class="bar__rename">
+    <summary>Change your name</summary>
+    <form method="post" action="/api/handle" data-handle-form>
+      <label for="handle">Your name</label>
+      <input type="text" id="handle" name="handle" value="${escape(state.you.handle)}" maxlength="24" required autocomplete="off">
+      <button type="submit">Rename</button>
+      <span class="bar__msg" data-handle-status role="status"></span>
+    </form>
+  </details>
   <nav><a href="/readme/">What good means</a></nav>
 </header>
 
-<main id="main">
+<main id="main" data-since="${Number(state.meta.latestEvent) || 0}">
   ${notice ? `<p class="notice" role="status">${escape(notice)}</p>` : ""}
 
   <!-- Sound needs a script, so the controls for it arrive with one. -->

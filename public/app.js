@@ -56,6 +56,30 @@ async function send(data) {
 // swapped for a fresh copy.
 document.addEventListener("submit", async (event) => {
   const form = event.target;
+  if (form.matches("[data-handle-form]")) {
+    event.preventDefault();
+    const note = $("[data-handle-status]", form);
+    if (note) note.textContent = "saving…";
+    try {
+      const res = await fetch("/api/handle", {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ handle: new FormData(form).get("handle") }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error ?? "That name didn't save.");
+      for (const el of document.querySelectorAll("[data-handle]")) el.textContent = body.handle;
+      if (note) note.textContent = "saved";
+      await refresh();
+    } catch (error) {
+      if (error instanceof TypeError) {
+        form.submit();
+        return;
+      }
+      if (note) note.textContent = error.message;
+    }
+    return;
+  }
   if (!form.matches("[data-grid], [data-compose]")) return;
   event.preventDefault();
 
@@ -85,7 +109,9 @@ document.addEventListener("submit", async (event) => {
 // of them becomes one refresh.
 let pending = null;
 try {
-  const events = new EventSource("/api/events");
+  // From where the page was rendered, so a load doesn't replay old events.
+  const since = Number($("[data-since]")?.dataset.since) || 0;
+  const events = new EventSource("/api/events?since=" + since);
   for (const kind of ["trace.created", "trace.updated"]) {
     events.addEventListener(kind, () => {
       clearTimeout(pending);
