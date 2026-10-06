@@ -65,6 +65,11 @@ export function stream(res: ServerResponse, lastEventId: number): () => void {
     connection: "keep-alive",
     "x-accel-buffering": "no",
   });
+  // Node holds the headers back until the first write. A browser that opens
+  // the stream with nothing to replay --- which is every page load, now that
+  // a page asks only for what's new --- would otherwise wait up to the first
+  // heartbeat, twenty seconds, before it even knows the stream is open.
+  res.write(": open\n\n");
 
   const send = (event: Event): void => {
     res.write(`id: ${event.id}\nevent: ${event.kind}\ndata: ${event.payload}\n\n`);
