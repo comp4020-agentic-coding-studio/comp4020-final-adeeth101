@@ -75,7 +75,17 @@ export function stream(res: ServerResponse, lastEventId: number): () => void {
     res.write(`id: ${event.id}\nevent: ${event.kind}\ndata: ${event.payload}\n\n`);
   };
 
-  for (const missed of since(lastEventId)) send(missed);
+  // since() reads 200 at a time; keep reading until caught up, or a browser
+  // that was away for more than 200 changes gets a partial replay and then
+  // silence. Synchronous, so nothing recorded meanwhile can slip between the
+  // backlog and the live subscription below.
+  let cursor = lastEventId;
+  for (;;) {
+    const batch = since(cursor);
+    for (const missed of batch) send(missed);
+    if (batch.length < 200) break;
+    cursor = batch[batch.length - 1].id;
+  }
 
   listeners.add(send);
 

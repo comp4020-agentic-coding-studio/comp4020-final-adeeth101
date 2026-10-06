@@ -65,8 +65,20 @@ function withPattern(trace: Trace): Trace {
   return { ...trace, editable: fits, steps: fits ? pattern.steps : null };
 }
 
+const ownTraces = db.prepare(
+  `select t.id, t.visitor_id, t.slot, t.body, t.created_at, t.updated_at, v.handle
+     from trace t join visitor v on v.id = t.visitor_id
+    where t.visitor_id = ?`,
+);
+
 export function state(visitor: Visitor): State {
-  const traces = (listTraces.all() as unknown as Trace[]).map((trace) =>
+  const room = listTraces.all() as unknown as Trace[];
+  // The room shows the latest 200, but your own track must never fall off
+  // the end of that: a returning visitor whose track had gone quiet would
+  // otherwise open the page to an empty editor, though the track was saved.
+  const seen = new Set(room.map((t) => t.id));
+  const own = (ownTraces.all(visitor.id) as unknown as Trace[]).filter((t) => !seen.has(t.id));
+  const traces = [...room, ...own].map((trace) =>
     withPattern({ ...trace, mine: trace.visitor_id === visitor.id }),
   );
   return {
