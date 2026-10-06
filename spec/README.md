@@ -30,3 +30,21 @@ can judge; those are left to the crit and the marker.
 At a crit, a green `check` job is half the shipped mark, but it's never the
 judgement of the work: your tutor checks what you deployed against the published
 spec.
+
+## `contract.test.ts`
+
+Protects the promises in `docs/contract.md` against the running app:
+
+- two cookie jars are two visitors, a visitor keeps their id across requests,
+  and a tampered signature is rejected rather than honoured
+- `POST /api/act`: JSON in gets JSON out, form-encoded gets a 303 to `/`, and
+  an empty, a 281-character, and a non-JSON body are each refused with a 4xx
+  and a readable `error` rather than a 500
+- `/api/state` marks exactly the caller's own traces `mine`
+- `/readme/` reflects an edit to `README.md` without a restart (heading order
+  itself stays `invariants.test.ts`'s job)
+- `GET /api/act` is 405 with an `Allow` header, an unknown path is 404, and
+  `/static/` requests can't escape `public/`
+- `/healthz` answers with no cookie required and hands none out
+- `GET /api/events` opens an SSE stream and replays what a reconnecting
+  `Last-Event-ID` missed
