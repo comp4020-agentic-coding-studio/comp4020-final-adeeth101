@@ -145,14 +145,24 @@ it("on a network failure, neither navigates nor repeats the step, and says so", 
 });
 
 it("discards a refresh response that arrives after a newer one", async () => {
+  // Events never put two refreshes in flight (spec/live.test.ts holds that),
+  // but a save refreshes directly, so one can overtake a scheduled refresh
+  // that is still waiting. The older answer must not win.
   const gets: Deferred[] = [];
-  const page = open(() => {
+  const page = open((call) => {
+    if (call.method === "POST") return Promise.resolve(json({ ok: true }));
     const d = deferred();
     gets.push(d);
     return d.promise;
   });
-  await page.remoteUpdate(); // refresh 1, held
-  await page.remoteUpdate(); // refresh 2, held
+  await page.remoteUpdate(); // refresh 1, from the stream, held open
+  expect(gets).toHaveLength(1);
+
+  page.type("newer");
+  page.doc
+    .querySelector("[data-compose]")!
+    .dispatchEvent(new page.win.Event("submit", { bubbles: true, cancelable: true }));
+  await wait(50); // the save lands, then refreshes: refresh 2
   expect(gets).toHaveLength(2);
 
   gets[1].resolve(new Response(withSaved("newer")));
@@ -160,5 +170,5 @@ it("discards a refresh response that arrives after a newer one", async () => {
   gets[0].resolve(new Response(withSaved("older")));
   await wait(50);
 
-  expect(page.body().value).toBe("newer");
+  expect(page.body().value, "an older refresh overwrote a newer one").toBe("newer");
 });
