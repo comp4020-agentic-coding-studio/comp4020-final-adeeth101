@@ -261,10 +261,14 @@ it("replays missed events when given a Last-Event-ID", async () => {
   const visitor = await freshVisitor();
   const marker = `event-replay-probe-${Math.random()}`;
 
+  // The cursor is an *event* id. Trace ids count something else --- every
+  // toggle, edit and rename is an event but not a new trace --- so a cursor
+  // derived from them falls further behind the more the database is used,
+  // until the replay's 200-event page ends before the event being looked for.
   const before = await (await fetch(url("/api/state"))).json() as {
-    traces: { id: number }[];
+    meta: { latestEvent: number };
   };
-  const priorMaxId = Math.max(0, ...before.traces.map((t) => t.id)) - 1;
+  const priorMaxId = before.meta.latestEvent;
 
   const acted = await fetch(url("/api/act"), {
     method: "POST",

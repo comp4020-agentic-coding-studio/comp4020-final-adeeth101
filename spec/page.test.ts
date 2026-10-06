@@ -177,8 +177,8 @@ describe("renaming", () => {
 describe("the event stream", () => {
   // Reads /api/events for `ms`, returning the text received so far. The fetch
   // is aborted at the end so the connection never outlives the test. The
-  // response promise is not awaited up front: the server sends no headers
-  // until it first writes, so a stream with nothing to replay is silent.
+  // response promise is not awaited up front, so the timing holds whether or
+  // not the server sends anything before its first event.
   async function listen(since: number, ms: number, during?: () => Promise<void>): Promise<string> {
     const abort = new AbortController();
     let text = "";
@@ -217,11 +217,15 @@ describe("the event stream", () => {
     const v = await newVisitor();
     const slot = slotOf((await pageOf(v)).doc);
     let text = "";
+    // Other spec files write to the same app while this one listens, so new
+    // events may well arrive here. What must not arrive is anything at or
+    // before the point the page was rendered: that would be a replay.
     const quiet = await listen(latest, 1000);
+    const replayed = [...quiet.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1])).filter((id) => id <= latest);
     expect(
-      quiet,
+      replayed,
       "the stream replayed earlier events although it was told where the page left off",
-    ).not.toMatch(/^event: trace\./m);
+    ).toEqual([]);
 
     text = await listen(latest, 300, async () => {
       expect((await press(v, slot, 1)).status).toBe(303);
