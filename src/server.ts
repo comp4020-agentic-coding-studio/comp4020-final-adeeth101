@@ -156,7 +156,11 @@ const server = createServer(async (req, res) => {
           res.writeHead(303, { location: "/", ...cookie(visitor) });
           return res.end();
         }
-        return html(res, result.status, page(state(visitor), result.error), cookie(visitor));
+        // The refused text goes back into the editor: without a script there
+        // is no other copy of it, and a refusal shouldn't cost someone what
+        // they wrote.
+        const draft = typeof input.body === "string" ? input.body : undefined;
+        return html(res, result.status, page(state(visitor), result.error, draft), cookie(visitor));
       }
       return result.ok
         ? json(res, 200, result.state, cookie(visitor))
