@@ -147,7 +147,12 @@ export function page(state: State, notice?: string, draft?: string): string {
     <form class="compose" method="post" action="/api/act" data-compose>
       <input type="hidden" name="slot" value="${escape(slot)}" aria-label="Your track">
       <label for="body">Your track as Strudel code</label>
+      <p class="hint" id="body-help">One pattern per track, such as
+        <code>s("bd*2 [~ sd] hh").fast(2)</code>. Each track plays inside the room's
+        <code>stack(…)</code>, so whole programs with statements, like
+        <code>setcps(…);</code>, save but won't play.</p>
       <textarea id="body" name="body" rows="3" maxlength="280" required spellcheck="false"
+        aria-describedby="body-help"
         placeholder='s("bd ~ sd ~ bd bd sd ~")'>${escape(code)}</textarea>
       <p class="compose__row">
         <button type="submit">Save code</button>

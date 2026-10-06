@@ -87,7 +87,10 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<boole
   try {
     const body = await readFile(join(ROOT, "public", rel));
     send(res, 200, TYPES[extname(rel)] ?? "application/octet-stream", body, {
-      "cache-control": "public, max-age=300",
+      // Revalidate every time. With max-age a browser kept the old app.js
+      // for five minutes after a deploy, running it against new HTML. These
+      // files are small; a stale script that disagrees with its page is not.
+      "cache-control": "no-cache",
     });
     return true;
   } catch {
