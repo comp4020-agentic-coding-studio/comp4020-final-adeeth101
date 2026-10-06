@@ -82,6 +82,14 @@ export type ActResult = { ok: true; state: State } | { ok: false; error: string;
 // already owns it may write to it again. A slot of null is the pre-concept
 // shared scratch space and keeps its old, unowned behaviour untouched ---
 // nothing in docs/contract.md names a track yet, so that path stays as it was.
+// A bar is at most this many steps. The bound is what stops a single toggle
+// with an enormous index from allocating an array the size of the machine.
+export const MAX_STEPS = 32;
+
+// The same shape src/pattern.ts accepts as a step, kept short enough that a
+// full bar still fits the 280-character limit on a track.
+const SOUND_NAME = /^[a-zA-Z][a-zA-Z0-9]{0,7}$/;
+
 export function act(visitor: Visitor, input: Record<string, unknown>): ActResult {
   const slot = typeof input.slot === "string" && input.slot.length > 0 ? input.slot : null;
 
@@ -95,15 +103,35 @@ export function act(visitor: Visitor, input: Record<string, unknown>): ActResult
   const existing = mineInSlot.get(visitor.id, slot) as { id: number; body: string } | undefined;
 
   let body: string;
-  if (typeof input.step === "number" && Number.isInteger(input.step) && input.step >= 0) {
-    // A grid toggle: edit one step of the track's own pattern, leaving the
-    // rest of the code string untouched. Starts from a blank bar if the
-    // track doesn't exist yet, or its code isn't in the grid's subset.
-    const current = parse(existing?.body ?? "") ?? { steps: [] };
+  if (input.step !== undefined) {
+    // A grid toggle: edit one step of the track's own pattern.
+    const step = input.step;
+    if (typeof step !== "number" || !Number.isInteger(step) || step < 0 || step >= MAX_STEPS) {
+      return { ok: false, error: `A step is a whole number from 0 to ${MAX_STEPS - 1}.`, status: 400 };
+    }
+
+    const sound = input.sound === null || input.sound === "" || input.sound === undefined
+      ? null
+      : input.sound;
+    if (sound !== null && (typeof sound !== "string" || !SOUND_NAME.test(sound))) {
+      return { ok: false, error: "A sound is a short name of letters and digits, like bd.", status: 400 };
+    }
+
+    // Hand-written code the grid can't read is never overwritten by it: the
+    // grid would have to throw the code away to make room for a blank bar,
+    // and the person who wrote it would find their work replaced by a click.
+    const current = existing ? parse(existing.body) : { steps: [] };
+    if (current === null) {
+      return {
+        ok: false,
+        error: "This track is hand-written code, so it can only be edited as text.",
+        status: 409,
+      };
+    }
+
     const steps = [...current.steps];
-    while (steps.length <= input.step) steps.push(null);
-    const sound = typeof input.sound === "string" && input.sound.length > 0 ? input.sound : null;
-    steps[input.step] = sound;
+    while (steps.length <= step) steps.push(null);
+    steps[step] = sound;
     body = print({ steps });
   } else {
     body = typeof input.body === "string" ? input.body.trim() : "";
