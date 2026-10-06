@@ -31,7 +31,15 @@ function parseCookies(header: string | undefined): Map<string, string> {
   const out = new Map<string, string>();
   for (const part of (header ?? "").split(";")) {
     const cut = part.indexOf("=");
-    if (cut > 0) out.set(part.slice(0, cut).trim(), decodeURIComponent(part.slice(cut + 1).trim()));
+    if (cut <= 0) continue;
+    // Other sites' cookies on the same host can be malformed; one of them
+    // must not turn every request into a 500. A cookie that won't decode is
+    // ignored, like one that isn't there.
+    try {
+      out.set(part.slice(0, cut).trim(), decodeURIComponent(part.slice(cut + 1).trim()));
+    } catch {
+      continue;
+    }
   }
   return out;
 }
@@ -109,7 +117,18 @@ export function rename(visitor: Visitor, handle: string): void {
   renameVisitor.run(handle, visitor.id);
 }
 
-// A year, so "come back later" means later, not this afternoon. Not httpOnly:
-// nothing secret rides in it, and the page reads the handle for display.
-export const cookieHeader = (visitor: Visitor): string =>
-  `${COOKIE}=${encodeURIComponent(`${visitor.id}.${sign(visitor.id)}`)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+// Each visitor has one track, addressed by their id rather than their handle:
+// handles are short and can repeat, and two people called "odd glass" must
+// not end up fighting over one track. The server derives it, so it is also
+// the only track a visitor may start.
+export const trackOf = (visitorId: string): string => `t-${visitorId.slice(0, 12)}`;
+
+// A year, so "come back later" means later, not this afternoon. HttpOnly: the
+// signed value *is* the visitor's identity, so no script on the page --- and
+// the page plays other people's patterns --- gets to read it. Secure whenever
+// the request arrived over HTTPS (Fly's proxy says so); a laptop on plain
+// http still works.
+export const cookieHeader = (visitor: Visitor, secure = false): string =>
+  `${COOKIE}=${encodeURIComponent(`${visitor.id}.${sign(visitor.id)}`)}; Path=/; Max-Age=31536000; SameSite=Lax; HttpOnly${
+    secure ? "; Secure" : ""
+  }`;

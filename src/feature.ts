@@ -10,7 +10,7 @@
 // is finished, and a half-built idea can never leave the app dead.
 import { db, now } from "./db.ts";
 import { latestEventId, record } from "./events.ts";
-import type { Visitor } from "./identity.ts";
+import { trackOf, type Visitor } from "./identity.ts";
 import { parse, print, type Pattern } from "./pattern.ts";
 
 export type Trace = {
@@ -58,7 +58,11 @@ const updateTrace = db.prepare("update trace set body = ?, updated_at = ? where 
 
 function withPattern(trace: Trace): Trace {
   const pattern = parse(trace.body);
-  return { ...trace, editable: pattern !== null, steps: pattern?.steps ?? null };
+  // A bar longer than the grid can edit is still valid code, so it stays code:
+  // showing forty buttons and refusing a press on the fortieth would promise an
+  // edit the server won't make.
+  const fits = pattern !== null && pattern.steps.length <= MAX_STEPS;
+  return { ...trace, editable: fits, steps: fits ? pattern.steps : null };
 }
 
 export function state(visitor: Visitor): State {
@@ -106,9 +110,18 @@ export function act(visitor: Visitor, input: Record<string, unknown>): ActResult
   const slot = typeof input.slot === "string" && input.slot.length > 0 ? input.slot : null;
 
   if (slot !== null) {
+    if (slot.length > 64) return { ok: false, error: "That isn't a track.", status: 400 };
     const owner = ownerOfSlot.get(slot) as { visitor_id: string } | undefined;
     if (owner && owner.visitor_id !== visitor.id) {
       return { ok: false, error: "That track belongs to someone else.", status: 403 };
+    }
+    // Ownership has to hold for the first write too, not only once a track
+    // exists: otherwise anyone could start the track reserved for someone who
+    // hasn't written yet, and that person's own first press would be refused.
+    // A visitor may start exactly one track, the one derived from their id.
+    // Tracks they already own under another name stay theirs to edit.
+    if (!owner && slot !== trackOf(visitor.id)) {
+      return { ok: false, error: "You can only start your own track.", status: 403 };
     }
   }
 
@@ -132,7 +145,8 @@ export function act(visitor: Visitor, input: Record<string, unknown>): ActResult
     // In Strudel the number of steps is the length of the bar, so a new track
     // starts as a whole bar of rests: a first click on step 12 shouldn't make
     // a 13-step bar.
-    const current = existing ? parse(existing.body) : { steps: Array<null>(BAR).fill(null) };
+    const parsed = existing ? parse(existing.body) : { steps: Array<null>(BAR).fill(null) };
+    const current = parsed && parsed.steps.length <= MAX_STEPS ? parsed : null;
     if (current === null) {
       return {
         ok: false,

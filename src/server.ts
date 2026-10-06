@@ -77,10 +77,6 @@ const wantsHtml = (req: IncomingMessage): boolean =>
   (!(req.headers.accept ?? "").includes("application/json") &&
     (req.headers.accept ?? "").includes("text/html"));
 
-// Set on the first response to a new browser; sending it on every response
-// would reset the year-long expiry for no reason.
-const cookie = (visitor: Visitor): Record<string, string> =>
-  visitor.fresh ? { "set-cookie": cookieHeader(visitor) } : {};
 
 async function serveStatic(res: ServerResponse, pathname: string): Promise<boolean> {
   // normalize collapses '..' before anything is joined; a path that still
@@ -103,6 +99,13 @@ const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
   const path = url.pathname.replace(/\/+$/, "") || "/";
   const method = req.method ?? "GET";
+
+  // Set on the first response to a new browser; sending it on every response
+  // would reset the year-long expiry for no reason. Fly terminates TLS in
+  // front of the app, so HTTPS shows up only in the forwarded header.
+  const secure = req.headers["x-forwarded-proto"] === "https";
+  const cookie = (visitor: Visitor): Record<string, string> =>
+    visitor.fresh ? { "set-cookie": cookieHeader(visitor, secure) } : {};
 
   try {
     // Fly's health check, and the one route that touches neither the database
