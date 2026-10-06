@@ -180,32 +180,52 @@ const status = (message) => {
   if (el) el.textContent = message;
 };
 
+// The transport is in exactly one state. The button and the status follow it;
+// `playing` is only a mirror for the refresh code above.
+let state = "stopped"; // stopped | loading | playing | failed
+let playing = false;
+let run = 0; // bumped by every start, stop and evaluation; an older one gives up
 let strudel = null;
 let loading = null;
-let playing = false;
 
+function setState(next, message) {
+  state = next;
+  playing = next === "playing";
+  const button = $("[data-play]");
+  const engaged = next === "playing" || next === "loading";
+  if (button) {
+    button.textContent = engaged ? "Stop" : "Play";
+    button.setAttribute("aria-pressed", String(next === "playing"));
+  }
+  if (message !== undefined) status(message);
+}
+
+// The whole load is bounded: the download, initStrudel and its sample prebake.
 function load() {
   if (strudel) return Promise.resolve(strudel);
   loading ??= new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (fn, value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const timer = setTimeout(() => finish(reject, new Error("timed out")), 20000);
     const script = document.createElement("script");
     script.src = STRUDEL;
     script.crossOrigin = "anonymous";
-    const timer = setTimeout(() => reject(new Error("timed out")), 20000);
     script.onload = async () => {
-      clearTimeout(timer);
       try {
         const api = window.strudel;
         await window.initStrudel({ prebake: () => api.samples(SAMPLES) });
-        strudel = api;
-        resolve(api);
+        if (!done) strudel = api;
+        finish(resolve, api);
       } catch (error) {
-        reject(error);
+        finish(reject, error);
       }
     };
-    script.onerror = () => {
-      clearTimeout(timer);
-      reject(new Error("couldn't be fetched"));
-    };
+    script.onerror = () => finish(reject, new Error("couldn't be fetched"));
     document.head.append(script);
   }).catch((error) => {
     loading = null;
@@ -233,51 +253,69 @@ function selection() {
   return { codes, skipped };
 }
 
-async function play() {
+// Only claims what the last evaluation actually did. A newer start, stop or
+// evaluation makes this one give up before it touches the state.
+async function play(mine = ++run) {
   const { codes, skipped } = selection();
   if (codes.length === 0) {
-    status("Nothing to play yet. Press a step to start your track.");
+    strudel?.hush();
+    setState("playing", "Nothing is playing: there are no tracks to play yet. Press a step to start your track.");
     return;
   }
   try {
     await strudel.evaluate(`stack(${codes.join(",\n")})`);
   } catch (error) {
+    if (mine !== run) return;
     // One person's broken code shouldn't silence the room: fall back to the
     // tracks the grid can vouch for.
     const safe = [...document.querySelectorAll('.trace[data-kind="pattern"]')]
       .map((li) => $(".trace__body", li)?.textContent?.trim())
       .filter(Boolean);
-    if (safe.length > 0) await strudel.evaluate(`stack(${safe.join(",\n")})`).catch(() => {});
-    status(`Some code didn't run (${error.message}). Playing the patterns that did.`);
+    let fellBack = false;
+    if (safe.length > 0) {
+      try {
+        await strudel.evaluate(`stack(${safe.join(",\n")})`);
+        fellBack = true;
+      } catch {
+        /* nothing to fall back to */
+      }
+      if (mine !== run) return;
+    }
+    if (fellBack) {
+      setState("playing", `Some code didn't run (${error.message}). Playing the patterns that did.`);
+    } else {
+      strudel.hush();
+      setState("failed", `Nothing is playing: the code didn't run (${error.message}). Press Play to try again.`);
+    }
     return;
   }
-  status(
+  if (mine !== run) return;
+  setState(
+    "playing",
     `Playing ${codes.length} ${codes.length === 1 ? "track" : "tracks"}` +
       (skipped ? `, leaving out ${skipped} of other people's hand-written code.` : "."),
   );
 }
 
-$("[data-play]")?.addEventListener("click", async (event) => {
-  const button = event.currentTarget;
-  if (playing) {
+$("[data-play]")?.addEventListener("click", async () => {
+  if (state === "playing" || state === "loading") {
+    // Stop, including a start that hasn't finished loading.
+    run++;
     strudel?.hush();
-    playing = false;
-    button.textContent = "Play";
-    button.setAttribute("aria-pressed", "false");
-    status("Stopped.");
+    setState("stopped", "Stopped.");
     return;
   }
-  status("Loading sound…");
+  const mine = ++run;
+  setState("loading", "Loading sound…");
   try {
     await load();
   } catch (error) {
-    status(`Sound is unavailable (${error.message}). Everything else still works.`);
+    if (mine !== run) return;
+    setState("failed", `Sound is unavailable (${error.message}). Press Play to try again. Everything else still works.`);
     return;
   }
-  playing = true;
-  button.textContent = "Stop";
-  button.setAttribute("aria-pressed", "true");
-  await play();
+  if (mine !== run) return;
+  await play(mine);
 });
 
 $("[data-others]")?.addEventListener("change", () => {
