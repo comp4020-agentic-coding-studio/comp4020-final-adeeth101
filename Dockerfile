@@ -1,18 +1,27 @@
 # syntax = docker/dockerfile:1
 
-# A placeholder, and yours to replace: it serves one page, plus README.md
-# verbatim at /readme/, which is enough to prove the deploy path end to end.
-# Whatever your app is built with, the image that replaces this one must serve
-# HTTP on 0.0.0.0:$PORT (fly.toml sets PORT) and publish README.md at /readme/
-# (spec/README.md says what's checked).
+# The app has no runtime dependencies --- storage is node's own SQLite and the
+# server is node:http --- so there is nothing to install and no build step:
+# node 24 runs the TypeScript directly. That keeps the image small and the
+# deploy fast, which matters on one 256 MB machine.
+FROM docker.io/library/node:24.21.0-alpine
 
-FROM docker.io/library/busybox:1.38.0
-COPY placeholder/ /src/
-COPY README.md /src/
-# README.md goes into the page as-is, HTML-escaped, in place of @README@;
-# rendering it properly is your app's job
-RUN mkdir -p /site/readme \
-    && cp /src/index.html /site/ \
-    && sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g' /src/README.md > /src/body \
-    && sed -e '/@README@/{r /src/body' -e 'd}' /src/readme.html > /site/readme/index.html
-CMD ["sh", "-c", "exec httpd -f -p 0.0.0.0:${PORT:-8080} -h /site"]
+WORKDIR /app
+
+# README.md is copied because the app serves it at /readme/ at request time,
+# and the spec compares what's served against the file.
+COPY package.json tsconfig.json README.md ./
+COPY src/ ./src/
+COPY public/ ./public/
+
+ENV NODE_ENV=production
+# fly.toml sets PORT; this is the fallback for a plain `docker run`.
+ENV PORT=8080
+EXPOSE 8080
+
+# Not root, so a bug in the app can't rewrite the image. The volume at /data
+# has to be writable by this user, hence the chown.
+RUN mkdir -p /data && chown -R node:node /data /app
+USER node
+
+CMD ["node", "src/server.ts"]
