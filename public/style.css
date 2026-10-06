@@ -60,6 +60,21 @@ body {
 .bar h1 { font-size: 1.25rem; margin: 0; letter-spacing: -0.01em; }
 .bar__you { margin: 0; color: var(--dim); font-size: 0.875rem; }
 .bar nav { margin-left: auto; font-size: 0.875rem; }
+.bar__rename { font-size: 0.875rem; flex-basis: 100%; }
+.bar__rename summary { cursor: pointer; color: var(--accent); min-height: 2.75rem; display: flex; align-items: center; }
+.bar__rename form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding-bottom: 0.5rem; }
+.bar__rename input {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  min-height: 2.75rem;
+  min-width: 0;
+  max-width: 100%;
+}
+.bar__msg { color: var(--dim); }
 a { color: var(--accent); }
 .notice {
   margin: 1rem 0 0;
