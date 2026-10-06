@@ -1,0 +1,120 @@
+/* One stylesheet, custom properties at the top, dark mode by media query.
+   Everything sizes in relative units so a browser zoom or a 200% text setting
+   doesn't clip anything --- part of holding up under unintended use. */
+:root {
+  --bg: #fbfaf7;
+  --ink: #1b1a17;
+  --dim: #6a6761;
+  --line: #ded9d0;
+  --mine: #f0ece2;
+  --accent: #2f4f4f;
+  --radius: 0.5rem;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #15161a;
+    --ink: #eceae5;
+    --dim: #9b968d;
+    --line: #2e3037;
+    --mine: #22252c;
+    --accent: #9ec7c0;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 1rem/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  padding: 0 1rem 4rem;
+}
+.skip {
+  position: absolute;
+  left: -9999px;
+}
+.skip:focus {
+  left: 1rem;
+  top: 1rem;
+  z-index: 10;
+  background: var(--bg);
+  padding: 0.5rem 0.75rem;
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+}
+/* A visible focus ring everywhere, because the artefact band names keyboard
+   use explicitly. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.bar, main { max-width: 38rem; margin: 0 auto; }
+.bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  align-items: baseline;
+  padding: 1.5rem 0 1rem;
+  border-bottom: 1px solid var(--line);
+}
+.bar h1 { font-size: 1.25rem; margin: 0; letter-spacing: -0.01em; }
+.bar__you { margin: 0; color: var(--dim); font-size: 0.875rem; }
+.bar nav { margin-left: auto; font-size: 0.875rem; }
+a { color: var(--accent); }
+.notice {
+  margin: 1rem 0 0;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--mine);
+}
+.compose { margin: 1.5rem 0; display: grid; gap: 0.5rem; }
+.compose label { font-size: 0.875rem; color: var(--dim); }
+textarea {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.625rem 0.75rem;
+  resize: vertical;
+}
+.compose__row { display: flex; align-items: center; gap: 0.75rem; margin: 0; }
+button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+  cursor: pointer;
+  /* 44px of touch target at the small viewport. */
+  min-height: 2.75rem;
+}
+button:hover { filter: brightness(1.1); }
+.compose__hint { font-size: 0.875rem; color: var(--dim); }
+h2 { font-size: 0.875rem; font-weight: 600; color: var(--dim); text-transform: lowercase; }
+.traces { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.trace {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+}
+.trace--mine { background: var(--mine); border-color: var(--accent); }
+.trace__body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.trace__by { margin: 0.375rem 0 0; font-size: 0.8125rem; color: var(--dim); }
+.empty { color: var(--dim); }
+.prose { padding-top: 1rem; }
+.prose pre {
+  overflow-x: auto;
+  background: var(--mine);
+  padding: 0.75rem;
+  border-radius: var(--radius);
+}
+.prose code { font-size: 0.9em; }
+.prose img { max-width: 100%; height: auto; }
+.prose table { width: 100%; border-collapse: collapse; }
+@media (prefers-reduced-motion: no-preference) {
+  .trace { transition: background-color 0.2s ease; }
+}
