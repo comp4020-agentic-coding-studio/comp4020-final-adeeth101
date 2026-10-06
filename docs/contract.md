@@ -61,9 +61,9 @@ it and week 11's instruments read it, so a gap in it is a gap in both.
 | `GET /static/*` | files from `public/` |
 | `GET /api/me` | `{id, handle, fresh}` |
 | `GET /api/state` | the `State` in `src/feature.ts` |
-| `POST /api/act` | the core action; `{slot?, body}` |
-| `POST /api/handle` | `{handle}` |
-| `GET /api/events` | SSE; honours `Last-Event-ID` |
+| `POST /api/act` | the core action: `{slot, body}` sets a track's code; `{slot, step, sound?}` sets or cycles one grid step |
+| `POST /api/handle` | `{handle}`; a form post gets a 303, like `/api/act` |
+| `GET /api/events` | SSE from `?since=` or `Last-Event-ID`; replays the whole backlog after it, then stays open |
 
 **Who a visitor is.** Every response to a new browser sets a signed `visitor`
 cookie, but nothing is written until that visitor first writes something
@@ -87,6 +87,35 @@ Three rules hold across all of them:
 - **A refused action is not an error.** `act()` returns `{ok:false, error,
   status}` and the person is shown `error`. The rule a concept enforces is
   refused here, in one place, and shown rather than swallowed.
+
+The identity cookie is `HttpOnly`, and `Secure` behind HTTPS: the signed value
+is the visitor's identity, and no script on the page needs it.
+
+## Tracks
+
+- **One track per visitor, owned from its first write.** The server derives a
+  visitor's track from their id (`trackOf()` in `src/identity.ts`). That is the
+  only track they may start; a track they already own under another name stays
+  theirs. Writing to someone else's track, or starting one that isn't yours, is
+  a 403 — including a track whose owner hasn't written yet.
+- **The code string is the only copy.** `steps` is derived from `body` on every
+  read and never stored, so the grid and the code cannot disagree.
+- **The grid edits only what it can read exactly:** one `s("...")` of plain
+  sound names and `~`, at most 32 steps. Anything else is hand-written code. It
+  is kept as written, shown without a grid, and a grid press on it is a 409 —
+  the grid never overwrites code it only half understands.
+- **A trace with no slot is a note**, from before the instrument. Notes are kept
+  and shown, but not counted, not called code and never played.
+
+## Sound
+
+Evaluated only in the listener's browser, never on the server, with
+`@strudel/web` pinned and fetched only when someone presses Play. What plays:
+every grid-shaped track in the room — its code can only be `s("...")` of plain
+names, so it can do nothing but make sound — and your own code. Other people's
+hand-written code is not played, because Strudel runs it as JavaScript in your
+page. Opening that up needs a real boundary (per-revision consent, or proper
+isolation), which is a design of its own.
 
 ## What is fixed by the course
 
