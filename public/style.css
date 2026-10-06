@@ -79,8 +79,11 @@ textarea {
   border-radius: var(--radius);
   padding: 0.625rem 0.75rem;
   resize: vertical;
+  /* A single long word with no spaces (a URL, a hash) must not push the
+     textarea wider than the viewport at 320px. */
+  overflow-wrap: anywhere;
 }
-.compose__row { display: flex; align-items: center; gap: 0.75rem; margin: 0; }
+.compose__row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0; }
 button {
   font: inherit;
   padding: 0.5rem 1rem;
