@@ -1,5 +1,6 @@
 node_modules/
 dist/
+.playwright/
 *.log
 
 # editor and OS junk

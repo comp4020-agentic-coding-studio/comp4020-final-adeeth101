@@ -1,10 +1,27 @@
 # syntax = docker/dockerfile:1
 
-# The app has no runtime dependencies --- storage is node's own SQLite and the
-# server is node:http --- so there is nothing to install and no build step:
-# node 24 runs the TypeScript directly. That keeps the image small and the
-# deploy fast, which matters on one 256 MB machine.
-FROM docker.io/library/node:24.21.0-alpine
+# Client assets are compiled on the builder, never on the small running
+# machine. Blockly, Strudel and Vite are build-time inputs bundled into
+# dist/client; the server's only runtime package is Acorn, which it uses to
+# re-parse submitted code. A separate production install keeps the image to
+# exactly that.
+FROM docker.io/library/node:24.21.0-alpine AS build
+WORKDIR /app
+RUN npm install -g pnpm@11.9.0
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile --ignore-scripts
+COPY client/ ./client/
+COPY shared/ ./shared/
+COPY vite.config.ts tsconfig.json ./
+RUN pnpm build
+
+FROM docker.io/library/node:24.21.0-alpine AS deps
+WORKDIR /app
+RUN npm install -g pnpm@11.9.0
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts
+
+FROM docker.io/library/node:24.21.0-alpine AS runtime
 
 WORKDIR /app
 
@@ -13,6 +30,9 @@ WORKDIR /app
 COPY package.json tsconfig.json README.md ./
 COPY src/ ./src/
 COPY public/ ./public/
+COPY shared/ ./shared/
+COPY --from=build /app/dist/ ./dist/
+COPY --from=deps /app/node_modules/ ./node_modules/
 
 ENV NODE_ENV=production
 # fly.toml sets PORT; this is the fallback for a plain `docker run`.

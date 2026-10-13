@@ -40,6 +40,12 @@ jobs:
         run: pnpm check
         env:
           APP_URL: http://localhost:8080
+      - name: Check the production browser flows
+        run: |
+          pnpm exec playwright install --with-deps chromium
+          pnpm test:browser
+        env:
+          APP_URL: http://localhost:8080
       - name: Show the app's output
         # what the container printed, so a crash or slow boot is visible
         if: ${{ failure() }}

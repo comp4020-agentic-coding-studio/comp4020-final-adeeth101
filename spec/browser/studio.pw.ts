@@ -1,0 +1,26 @@
+import {test,expect} from '@playwright/test';
+test('three editors, two collaborators, bots and conductor performance',async({browser})=>{
+  const first=await browser.newContext({viewport:{width:1920,height:1080}}),second=await browser.newContext({viewport:{width:390,height:844}});
+  const a=await first.newPage(),b=await second.newPage();
+  const errors:string[]=[];a.on('pageerror',e=>errors.push(e.message));b.on('pageerror',e=>errors.push(e.message));
+  await a.goto('/');await a.getByLabel('Name your piece').fill('Browser proof');await a.getByRole('button',{name:/Create a piece/}).click();await a.waitForURL(/\/p\/.*\/compose/);
+  const compose=a.url();await a.getByRole('button',{name:'+ Drums',exact:true}).click();await expect(a.getByRole('button',{name:'Kick step 1',exact:true})).toBeVisible();
+  await a.getByRole('button',{name:'Kick step 1',exact:true}).click();await a.getByRole('button',{name:/Apply to piece/}).click();await expect(a.locator('#draft-status')).toContainText('Saved');
+  await b.goto(compose);await b.getByRole('button',{name:'+ Melody',exact:true}).click();await b.getByRole('button',{name:/Code$/,exact:false}).first().click();
+  await b.getByLabel('Your clip as Strudel').fill('note("60 ~ 64 67").s("triangle").slow(2)');await b.getByRole('button',{name:/Apply to piece/}).click();await expect(b.locator('#draft-status')).toContainText('Saved');
+  await expect(a.locator('#track-list')).toContainText('Melody');
+  await b.getByRole('button',{name:/Blocks$/,exact:false}).click();await expect(b.locator('.blocklySvg')).toBeVisible();await expect(b.locator('[data-form-value]')).toHaveValue('2');
+  await b.getByRole('button',{name:/Instruments$/,exact:false}).click();await expect(b.locator('.note-grid')).toBeVisible();
+  await b.getByRole('button',{name:/Code$/,exact:false}).first().click();await b.getByLabel('Your clip as Strudel').fill('fetch("/api/me")');await expect(b.getByRole('button',{name:/Apply to piece/})).toBeDisabled();await b.waitForTimeout(400);await b.reload();await b.getByRole('button',{name:/Code$/,exact:false}).first().click();await expect(b.getByLabel('Your clip as Strudel')).toHaveValue('fetch("/api/me")');
+  await b.getByRole('button',{name:'Use visual version'}).click();
+  await a.getByRole('button',{name:'Generate idea'}).click();await a.getByRole('button',{name:'Use in my draft'}).click();await a.getByRole('button',{name:/Apply to piece/}).click();await expect(a.locator('#draft-status')).toContainText('Saved');
+  await a.screenshot({path:'.playwright/compose-desktop.png',fullPage:true});await b.screenshot({path:'.playwright/compose-phone.png',fullPage:true});
+  await a.getByRole('link',{name:'Perform',exact:true}).click();await a.getByRole('button',{name:'Take conductor role'}).click();await a.getByRole('button',{name:'Enable sound',exact:true}).click();await a.getByRole('button',{name:'Start ensemble',exact:true}).click();
+  await b.goto(compose.replace('/compose','/perform'));await expect(b.getByRole('button',{name:'Take conductor role'})).toBeDisabled();await b.getByRole('button',{name:'Enable sound',exact:true}).click();
+  await a.getByRole('button',{name:'Start arranger',exact:true}).click();await expect(a.locator('#arr-status')).toContainText(/Arranger|Manual/);
+  await expect.poll(()=>a.evaluate(()=>((window as any).streamDebug.audio()?.trace.length??0))).toBeGreaterThan(0);
+  await expect.poll(()=>b.evaluate(()=>((window as any).streamDebug.audio()?.trace.length??0))).toBeGreaterThan(0);
+  await a.screenshot({path:'.playwright/perform-desktop.png',fullPage:true});await b.screenshot({path:'.playwright/perform-phone.png',fullPage:true});
+  await a.getByRole('button',{name:'Stop ensemble',exact:true}).click();await expect(b.locator('.stage-clock [role="status"]')).toContainText('Ensemble stopped');expect(errors).toEqual([]);
+  await first.close();await second.close();
+});
