@@ -9,7 +9,7 @@
 // there"), which means the deploy can be proved end to end before the concept
 // is finished, and a half-built idea can never leave the app dead.
 import { db, now } from "./db.ts";
-import { latestEventId, record } from "./events.ts";
+import { latestEventId, record, publish, type Event } from "./events.ts";
 import { trackOf, type Visitor } from "./identity.ts";
 import { parse, print, type Pattern } from "./pattern.ts";
 
@@ -199,19 +199,22 @@ export function act(visitor: Visitor, input: Record<string, unknown>): ActResult
   // page, and an event for a change that didn't happen would refresh to
   // nothing.
   db.exec("begin");
+  let announced: Event;
   try {
     if (existing) {
       updateTrace.run(body, now(), existing.id);
-      record(visitor.id, "trace.updated", { id: existing.id, slot, body });
+      announced = record(visitor.id, "trace.updated", { id: existing.id, slot, body }, false);
     } else {
       const { id } = insertTrace.get(visitor.id, slot, body, now(), now()) as { id: number };
-      record(visitor.id, "trace.created", { id, slot, body });
+      announced = record(visitor.id, "trace.created", { id, slot, body }, false);
     }
     db.exec("commit");
   } catch (error) {
     db.exec("rollback");
     throw error;
   }
+
+  publish(announced);
 
   return { ok: true, state: state(visitor) };
 }

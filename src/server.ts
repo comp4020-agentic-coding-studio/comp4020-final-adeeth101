@@ -11,6 +11,8 @@ import { cleanHandle, cookieHeader, identify, persist, rename, type Visitor } fr
 import { act, state } from "./feature.ts";
 import { record, stream } from "./events.ts";
 import { page, readmePage } from "./page.ts";
+import {createProject,command,snapshot,projectStream,updatePresence,exportProject,importProject,CommandError} from './studio.ts';
+import {studioPage,archiveHtml} from './studio-page.ts';
 
 const PORT = Number(process.env.PORT ?? 8080);
 // fileURLToPath, not .pathname: a path with a space in it arrives
@@ -45,12 +47,12 @@ const html = (res: ServerResponse, status: number, body: string, extra = {}): vo
 
 // Bodies are small by design; anything larger is a mistake or an attack, and
 // either way the app should not hold it in memory.
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(req: IncomingMessage, limit = 64*1024): Promise<Record<string, unknown>> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 64 * 1024) throw new Error("body too large");
+    if (size > limit) throw new Error("body too large");
     chunks.push(chunk as Buffer);
   }
   if (chunks.length === 0) return {};
@@ -78,14 +80,14 @@ const wantsHtml = (req: IncomingMessage): boolean =>
     (req.headers.accept ?? "").includes("text/html"));
 
 
-async function serveStatic(res: ServerResponse, pathname: string): Promise<boolean> {
+async function serveStatic(res: ServerResponse, pathname: string, assets=false): Promise<boolean> {
   // normalize collapses '..' before anything is joined; a path that still
   // escapes public/ afterwards is refused rather than cleaned, so there is no
   // sanitiser to outsmart.
-  const rel = normalize(pathname.replace(/^\/static\//, ""));
+  const rel = normalize(pathname.replace(assets ? /^\/assets\// : /^\/static\//, ""));
   if (rel.startsWith("..") || isAbsolute(rel)) return false;
   try {
-    const body = await readFile(join(ROOT, "public", rel));
+    const body = await readFile(join(ROOT, assets ? 'dist/client' : "public", rel));
     send(res, 200, TYPES[extname(rel)] ?? "application/octet-stream", body, {
       // Revalidate every time. With max-age a browser kept the old app.js
       // for five minutes after a deploy, running it against new HTML. These
@@ -115,6 +117,16 @@ const server = createServer(async (req, res) => {
     // nor a cookie --- so it still answers when something else is broken.
     if (path === "/healthz") return json(res, 200, { ok: true });
 
+    if (path.startsWith('/assets/')) {
+      if(await serveStatic(res,url.pathname,true))return;
+      return json(res,404,{error:'Asset not found.'});
+    }
+
+    if(method === 'POST'){
+      const origin=req.headers.origin;
+      if(req.headers['sec-fetch-site']==='cross-site'||(origin&&new URL(origin).host!==req.headers.host))return json(res,403,{error:'Send changes from this studio.'});
+    }
+
     if (path.startsWith("/static/")) {
       if (await serveStatic(res, url.pathname)) return;
       return send(res, 404, "text/plain; charset=utf-8", "not found");
@@ -129,7 +141,30 @@ const server = createServer(async (req, res) => {
 
     const visitor = identify(req.headers.cookie);
 
-    if (path === "/") {
+    if (path === '/api/time') return json(res,200,{serverNowMs:Date.now()});
+    if(path === '/api/projects' && method === 'POST'){
+      const result=createProject(visitor,(await readJson(req)).title);
+      if(wantsHtml(req)){res.writeHead(303,{location:`/p/${result.id}/compose`,...cookie(visitor)});return res.end();}
+      return json(res,201,result,cookie(visitor));
+    }
+    if(path === '/api/import' && method === 'POST')return json(res,201,importProject(visitor,await readJson(req,512*1024)),cookie(visitor));
+    // Studio mutations are JSON only; a form or text post is refused before parsing.
+    if(method==='POST'&&(path==='/api/import'||/^\/api\/projects\/[^/]+\/(commands|presence)$/.test(path))&&!(req.headers['content-type']??'').includes('application/json'))return json(res,415,{error:'Send JSON.'});
+    const apiProject=path.match(/^\/api\/projects\/([0-9a-f-]+)(?:\/(commands|events|presence|export))?$/);
+    if(apiProject){
+      const [,id,action]=apiProject;
+      if(!action && method==='GET')return json(res,200,snapshot(id,visitor),cookie(visitor));
+      if(action==='commands'&&method==='POST')return json(res,200,command(visitor,id,await readJson(req)),cookie(visitor));
+      if(action==='events'&&method==='GET'){const cursor=Number(req.headers['last-event-id']??url.searchParams.get('since')??0);res.setHeader('set-cookie',cookieHeader(visitor,secure));projectStream(id,visitor,res,Number.isFinite(cursor)?cursor:0);return;}
+      if(action==='presence'&&method==='POST'){updatePresence(id,visitor,(await readJson(req)).route);return json(res,200,{ok:true},cookie(visitor));}
+      if(action==='export'&&method==='GET')return json(res,200,exportProject(id,visitor),{'content-disposition':'attachment; filename="stream-piece.json"',...cookie(visitor)});
+      return json(res,405,{error:'Method not allowed.'},{allow:action==='commands'||action==='presence'?'POST':'GET'});
+    }
+    const studio=path.match(/^\/p\/([0-9a-f-]+)\/(compose|perform)$/);
+    if(studio){snapshot(studio[1],visitor);return html(res,200,await studioPage(studio[1],studio[2]),cookie(visitor));}
+    if(path === '/')return html(res,200,await studioPage(),cookie(visitor));
+    if(path === '/archive')return html(res,200,readmePage(`<h1>Earlier source sketches</h1>${archiveHtml()}`),cookie(visitor));
+    if (path === "/legacy") {
       return html(res, 200, page(state(visitor)), cookie(visitor));
     }
 
@@ -189,13 +224,14 @@ const server = createServer(async (req, res) => {
 
     return html(res, 404, page(state(visitor), "There's nothing at that address."), cookie(visitor));
   } catch (error) {
+    if(error instanceof CommandError)return json(res,error.status,{error:error.message,current:error.current},error.status===429?{'retry-after':'1'}:{});
     const message = error instanceof Error ? error.message : "unknown";
     // Logged here and nowhere else, so week 11's instruments have one seam to
     // widen rather than a scatter of console calls.
     console.error(JSON.stringify({ at: Date.now(), level: "error", path, method, message }));
     if (res.headersSent) return res.end();
-    const client = message === "body too large" || message === "body is not json";
-    return json(res, client ? 400 : 500, { error: client ? message : "something broke" });
+    const status = message === "body too large" ? 413 : message === "body is not json" ? 400 : 500;
+    return json(res, status, { error: status < 500 ? message : "something broke" });
   }
 });
 
@@ -206,5 +242,7 @@ server.listen(PORT, "0.0.0.0", () => {
 // Fly stops the machine when nobody's using it: close cleanly so WAL is
 // checkpointed and the next visitor doesn't open a half-written database.
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
-  process.on(signal, () => server.close(() => process.exit(0)));
+  // Live streams never end on their own, so they are closed explicitly;
+  // otherwise close() would wait for them until Fly gives up and kills us.
+  process.on(signal, () => { server.close(() => process.exit(0)); server.closeAllConnections(); });
 }

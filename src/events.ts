@@ -30,11 +30,17 @@ export function record(
   visitorId: string | null,
   kind: string,
   payload: Record<string, unknown> = {},
+  broadcast = true,
 ): Event {
   const at = now();
   const body = JSON.stringify(payload);
   const { id } = insertEvent.get(visitorId, kind, body, at) as { id: number };
   const event: Event = { id, visitor_id: visitorId, kind, payload: body, created_at: at };
+  if (broadcast) publish(event);
+  return event;
+}
+
+export function publish(event: Event): void {
   for (const listener of listeners) {
     // One broken subscriber must not stop the others, or lose the write.
     try {
@@ -43,7 +49,6 @@ export function record(
       /* dropped: the stream is a courtesy, the log is the truth */
     }
   }
-  return event;
 }
 
 export const since = (id: number): Event[] => sinceEvents.all(id) as Event[];

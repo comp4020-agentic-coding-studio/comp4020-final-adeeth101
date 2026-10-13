@@ -16,7 +16,7 @@ import { inject } from "vitest";
 const baseUrl = inject("baseUrl");
 
 async function getDocument(path = "/"): Promise<Document> {
-  const res = await fetch(new URL(path, baseUrl));
+  const res = await fetch(new URL(path === "/" ? "/legacy" : path, baseUrl));
   const html = await res.text();
   return new JSDOM(html).window.document;
 }
@@ -130,7 +130,7 @@ it("text that looks like HTML is shown as text, never executed", async () => {
     redirect: "manual",
   });
 
-  const res = await fetch(new URL("/", baseUrl));
+  const res = await fetch(new URL("/legacy", baseUrl));
   const raw = await res.text();
   // The escaped form must be present somewhere in the raw HTML...
   expect(raw).toContain("&lt;script&gt;");

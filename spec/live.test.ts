@@ -10,7 +10,7 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 let html = "";
 let source = "";
 beforeAll(async () => {
-  html = await (await fetch(new URL("/", baseUrl))).text();
+  html = await (await fetch(new URL("/legacy", baseUrl))).text();
   source = await (await fetch(new URL("/static/app.js", baseUrl))).text();
 });
 

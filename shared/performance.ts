@@ -35,3 +35,10 @@ export function resolvePlan(p: Plan, cycle: number) {
 }
 export function cycleAt(nowMs:number, epochMs:number, bpm:number) { return (nowMs-epochMs)*bpm/240000; }
 export function nextBoundary(nowMs:number,epochMs:number,bpm:number) { return Math.max(0,Math.ceil(cycleAt(nowMs+1000,epochMs,bpm))); }
+// After a restart, keep what was sounding at the last durable write and drop
+// anything still queued beyond it; the next start must not apply it silently.
+export function planAtRestart(plans:Plan[],epochMs:number|null,bpm:number,lastWriteMs:number):Plan{
+  if(epochMs===null)return structuredClone(plans.at(-1)??blankPlan());
+  const cycle=cycleAt(lastWriteMs,epochMs,bpm),p=structuredClone(planAt(plans,cycle)??plans[0]??blankPlan());
+  p.scene=sceneAt(p,Math.max(0,cycle));return p;
+}

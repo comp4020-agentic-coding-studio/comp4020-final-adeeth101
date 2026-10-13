@@ -7,7 +7,7 @@ import { JSDOM } from "jsdom";
 import { describe, expect, inject, it } from "vitest";
 
 const baseUrl = inject("baseUrl");
-const url = (path: string): URL => new URL(path, baseUrl);
+const url = (path: string): URL => new URL(path === "/" ? "/legacy" : path, baseUrl);
 
 type Visitor = { cookie: string };
 
