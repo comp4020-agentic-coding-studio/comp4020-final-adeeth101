@@ -5,7 +5,7 @@ import { join,normalize } from 'node:path';
 const manifest=JSON.parse(await readFile('dist/client/.vite/manifest.json','utf8'));
 const server=createServer(async(req,res)=>{
   try{
-    if(req.url==='/'){res.setHeader('content-type','text/html');res.end(`<button>Enable sound</button><script type="module" src="/assets/${manifest['client/main.ts'].file}"></script>`);return;}
+    if(req.url==='/'){res.setHeader('content-type','text/html');res.end(`<button>Enable sound</button><script type="module" src="/assets/${manifest['client/audio-proof.ts'].file}"></script>`);return;}
     const rel=normalize(req.url.replace('/assets/',''));if(rel.startsWith('..'))throw Error();
     res.setHeader('content-type','text/javascript');res.end(await readFile(join('dist/client',rel)));
   }catch{res.statusCode=404;res.end();}

@@ -1,0 +1,5 @@
+import type {ClipDocument} from '../shared/music.ts';
+export type Draft={document:ClipDocument;source:string;invalid:string|null;baseRevision:number;workspace?:object;provenance?:Record<string,unknown>;undo?:Draft[]};
+function database():Promise<IDBDatabase>{return new Promise((resolve,reject)=>{const req=indexedDB.open('stream-drafts',1);req.onupgradeneeded=()=>req.result.createObjectStore('drafts');req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}
+export async function readDraft(key:string):Promise<Draft|undefined>{const db=await database();try{return await new Promise((resolve,reject)=>{const tx=db.transaction('drafts'),req=tx.objectStore('drafts').get(key);req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error);});}finally{db.close();}}
+export async function writeDraft(key:string,value:Draft){const db=await database();try{await new Promise<void>((resolve,reject)=>{const tx=db.transaction('drafts','readwrite');tx.objectStore('drafts').put(value,key);tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);});}finally{db.close();}}
