@@ -1,3 +1,5 @@
 The biggest realisation I had since my last crit was realising the primary purpose of the interface design was to define who is in the room and who has permission to make changes. That led me to divide the application into two areas: composing and performing. It also helped me understand the difference between allowing people to listen locally versus conduct globally. 
 
 Ultimately, I wish to create an environment where a new contributor can make a meaningful contribution within minutes while an advanced contributor maintains complete precision. This means determining constraints openly and explicitly stating what this system cannot do. However, this "audible in one minute" hypothesis sounds more like a marketing gimmick until an untrained user successfully accomplishes it so everything else remains purely speculative. Therefore, every area that currently is unbuilt represents nothing more than a directionally motivated objective.
+
+Note for future crit: The app works but it isnt as intuitive as I would like, adding tutorials is the easy fix but I think I will have to test this interaction myself.
