@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 // finds. Only spec/ runs: a test anywhere else needs adding to `include`.
 export default defineConfig({
   test: {
+    server: { deps: { inline: [/@strudel\//, /@kabelsalat\//] } },
     include: ["spec/**/*.test.ts"],
     globalSetup: ["./spec/global-setup.ts"],
   },
