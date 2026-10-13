@@ -221,7 +221,9 @@ export function projectStream(id:string,v:Visitor,res:ServerResponse,cursor:numb
   if(missed.length>500)res.write(`id: ${newest}\nevent: reset\ndata: {}\n\n`);
   else for(const e of missed)res.write(`id: ${e.id}\nevent: change\ndata: ${JSON.stringify({projectId:id,kind:e.kind})}\n\n`);
   const listener={visitorId:v.id,res};set.add(listener);listeners.set(id,set);
-  const timer=setInterval(()=>res.write(': beat\n\n'),15000);res.on('close',()=>{clearInterval(timer);set.delete(listener);if(!set.size)listeners.delete(id);});
+  // A named beat, not a comment: browsers hide comments, and the client needs
+  // a pulse to notice a connection that died without closing.
+  const timer=setInterval(()=>res.write('event: beat\ndata: {}\n\n'),5000);res.on('close',()=>{clearInterval(timer);set.delete(listener);if(!set.size)listeners.delete(id);});
 }
 export function updatePresence(id:string,v:Visitor,route:unknown){
   need(one('select id from project where id=?',id),'Piece not found.',404);const p=presence.get(id)??new Map();

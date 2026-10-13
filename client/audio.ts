@@ -24,6 +24,7 @@ export class StudioAudio {
   private run=0;
   private dry:GainNode|null=null;
   private wet:GainNode|null=null;
+  private solo=new Set<string>();
   trace:AudioTrace[]=[];
   onError:(message:string)=>void=()=>{};
   async prepare() {
@@ -43,6 +44,8 @@ export class StudioAudio {
     if(this.context.state!=='running')throw new Error('Audio is suspended. Enable sound again.');
   }
   setOffset(offset:number){this.offset=offset;}
+  // Solo is a listening aid on this device only; the shared mix is unchanged.
+  setSolo(ids:Iterable<string>){this.solo=new Set(ids);}
   setVolume(value:number){if(this.output)this.output.gain.value=Math.max(0,Math.min(1,value))*0.3;}
   update(plans:Plan[],epoch:number,bpm:number,generation:number){
     this.plans=plans;this.bpm=bpm;
@@ -74,7 +77,7 @@ export class StudioAudio {
       while(this.cursor<end){
         const begin=this.cursor, until=Math.min(end,Math.floor(begin+1e-8)+1);
         const p=planAt(this.plans,begin);
-        const selected=this.preview&&this.previewPattern?[{pattern:this.previewPattern,gain:0.7}]:p?resolvePlan(p,begin).map(x=>{
+        const selected=this.preview&&this.previewPattern?[{pattern:this.previewPattern,gain:0.7}]:p?resolvePlan(p,begin).filter(x=>!this.solo.size||this.solo.has(x.trackId)).map(x=>{
           const key=JSON.stringify(x.document);let pattern=this.cache.get(key);if(!pattern){pattern=compile(x.document.root);if(this.cache.size>100)this.cache.clear();this.cache.set(key,pattern);}return {pattern,gain:x.gain};
         }):[];
         for(const {pattern,gain} of selected){for(const hit of pattern.queryArc(begin,until,{_cps:this.bpm/240}).sort((a,b)=>Number(a.whole.begin)-Number(b.whole.begin))){if(!hit.hasOnset())continue;
