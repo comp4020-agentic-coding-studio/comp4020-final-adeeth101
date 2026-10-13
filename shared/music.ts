@@ -1,6 +1,7 @@
 export const SOUNDS = ['bd', 'sd', 'hh', 'cp'] as const;
 export const SYNTHS = ['sine', 'triangle', 'square', 'sawtooth'] as const;
 export const OPS = ['fast', 'slow', 'rev', 'gain', 'lpf', 'room'] as const;
+export const MAX_STEPS_PER_BAR = 128;
 export type Sound = typeof SOUNDS[number];
 export type Synth = typeof SYNTHS[number];
 export type Op = typeof OPS[number];
@@ -13,14 +14,14 @@ export type ClipDocument = { schemaVersion: 1; root: MusicNode };
 export function validateDocument(input: unknown): ClipDocument {
   const error = (message: string): never => { throw new Error(message); };
   if (!input || typeof input !== 'object' || (input as ClipDocument).schemaVersion !== 1) error('Unknown clip format.');
-  let leaves = 0, transforms = 0, cells = 0;
+  let leaves = 0, transforms = 0, cells = 0, perBar = 0;
   function walk(raw: unknown, depth: number, speed: number): MusicNode {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw) || depth > 8) error('A clip must be a bounded music tree (depth ≤8).');
     const n = raw as Record<string, unknown>;
     if (n.kind === 'sound' || n.kind === 'notes') {
       if (!Array.isArray(n.steps) || n.steps.length < 1 || n.steps.length > 32) error('A sequence has 1–32 steps.');
       const steps = n.steps as unknown[];
-      leaves++; cells += steps.length;
+      leaves++; cells += steps.length; perBar += steps.length * speed;
       if (speed < 0.25 || speed > 4) error('Combined speed must be between ¼ and 4×.');
       if (n.kind === 'sound') {
         if (steps.some(x => x !== null && !SOUNDS.includes(x as Sound))) error('Choose kick, snare, hat, clap or rest.');
@@ -50,6 +51,9 @@ export function validateDocument(input: unknown): ClipDocument {
   }
   const root = walk((input as ClipDocument).root, 1, 1);
   if (leaves > 4 || transforms > 8 || cells > 128) error('A clip supports four sequences, eight effects and 128 cells.');
+  // Measured bound: twelve clips at 512 steps per bar overran a desktop browser's
+  // scheduler. 128 per bar keeps the worst legal piece near 770 events/s at 120 BPM.
+  if (perBar > MAX_STEPS_PER_BAR) error(`A clip plays at most ${MAX_STEPS_PER_BAR} steps per bar (steps × speed). Remove steps or a speed-up.`);
   return { schemaVersion: 1, root };
 }
 export function emptyClip(kind: 'drums'|'melody' = 'drums'): ClipDocument {

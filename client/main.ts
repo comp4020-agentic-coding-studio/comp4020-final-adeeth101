@@ -58,7 +58,7 @@ async function boot(){
   window.addEventListener('beforeunload',e=>{if(!perform&&dirty&&(localPending||localFailed)){e.preventDefault();e.returnValue='';}});
   (window as any).streamDebug={snapshot:()=>state,audio:()=>audio};
 }
-async function getAudio(){if(!audio){const {StudioAudio}=await import('./audio.ts');audio=new StudioAudio();audio.onError=s=>{enabled=false;$('#audio-status').textContent=s;soundButton();};audio.setOffset(offset);}return audio;}
+async function getAudio(){if(!audio){const {StudioAudio}=await import('./audio.ts');audio=new StudioAudio();audio.onError=s=>{enabled=false;$('#audio-status').textContent=s;soundButton();};audio.onLag=n=>{$('#audio-status').textContent=`This device is falling behind: ${n} sound${n===1?' was':'s were'} skipped. Mute or solo tracks to lighten it.`;};audio.setOffset(offset);}return audio;}
 async function calibrate(){let best=Infinity;for(let i=0;i<5;i++){const a=Date.now(),x=await request('/api/time'),b=Date.now();if(b-a<best){best=b-a;offset=x.serverNowMs-(a+b)/2;}}audio?.setOffset(offset);}
 function soundButton(){$('[data-action="sound"]').textContent=enabled?'Silence this device':'Enable sound';}
 async function join(){if(!enabled||!audio||!live||document.hidden||previewing)return;audio.update(state.plans,state.transport.epochMs??0,state.settings.bpm,state.transport.generation);if(state.transport.status==='playing'){if(!audio.running)audio.startAt();$('#audio-status').textContent='Listening to the ensemble · joining at the next bar';}else{audio.stop();$('#audio-status').textContent='Sound enabled · ensemble stopped';}}

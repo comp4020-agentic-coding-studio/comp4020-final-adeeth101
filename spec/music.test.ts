@@ -34,3 +34,14 @@ it('arranger holds/loops and manual selection wins',()=>{
   expect(planAt([p,{...p,planRevision:2}],4)?.planRevision).toBe(2);
   expect(nextBoundary(300,0,120)).toBe(1);
 });
+it('bounds steps per bar so twelve clips stay schedulable',()=>{
+  const kit=(n:number)=>({kind:'stack',children:(['bd','sd','hh','cp'] as const).map(s=>({kind:'sound',steps:Array(n).fill(s)}))});
+  expect(()=>validateDocument({schemaVersion:1,root:kit(32)})).not.toThrow();
+  expect(()=>validateDocument({schemaVersion:1,root:{kind:'transform',op:'fast',value:2,child:kit(16)}})).not.toThrow();
+  expect(()=>validateDocument({schemaVersion:1,root:{kind:'transform',op:'fast',value:2,child:kit(32)}})).toThrow(/128 steps per bar/);
+  expect(()=>parseCode('s("bd sd hh cp bd sd hh cp bd sd hh cp bd sd hh cp bd sd hh cp bd sd hh cp bd sd hh cp bd sd hh cp").fast(4)')).not.toThrow();
+  expect(()=>parseCode('stack(s("bd bd bd bd bd bd bd bd"),s("hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh")).fast(4)')).toThrow(/steps per bar/);
+  // Only the combined speed counts: fast(4) inside slow(2) is still 2x.
+  expect(()=>validateDocument({schemaVersion:1,root:{kind:'transform',op:'slow',value:2,child:{kind:'transform',op:'fast',value:4,child:kit(32)}}})).toThrow(/steps per bar/);
+  expect(()=>validateDocument({schemaVersion:1,root:{kind:'transform',op:'fast',value:4,child:{kind:'transform',op:'slow',value:4,child:kit(16)}}})).not.toThrow();
+});

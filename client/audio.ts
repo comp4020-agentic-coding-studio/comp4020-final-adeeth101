@@ -26,7 +26,13 @@ export class StudioAudio {
   private wet:GainNode|null=null;
   private solo=new Set<string>();
   trace:AudioTrace[]=[];
+  // Counters for load measurement: events voiced, events dropped as already
+  // past, and the slowest scheduling pass in milliseconds.
+  stats={scheduled:0,late:0,slowestTickMs:0};
   onError:(message:string)=>void=()=>{};
+  // Called (at most every 2 s) when sounds were skipped because this device fell behind.
+  onLag:(skipped:number)=>void=()=>{};
+  private lagReported=0;private lagCount=0;
   async prepare() {
     if(!this.context){
       const c=this.context=new AudioContext();
@@ -69,6 +75,7 @@ export class StudioAudio {
   }
   get running(){return this.timer!==null;}
   private tick(){
+    const started=performance.now();
     try{
       const c=this.context!;const now=Date.now()+this.offset;
       const end=Math.max(0,cycleAt(now+160,this.epoch,this.bpm));
@@ -78,19 +85,24 @@ export class StudioAudio {
         const begin=this.cursor, until=Math.min(end,Math.floor(begin+1e-8)+1);
         const p=planAt(this.plans,begin);
         const selected=this.preview&&this.previewPattern?[{pattern:this.previewPattern,gain:0.7}]:p?resolvePlan(p,begin).filter(x=>!this.solo.size||this.solo.has(x.trackId)).map(x=>{
-          const key=JSON.stringify(x.document);let pattern=this.cache.get(key);if(!pattern){pattern=compile(x.document.root);if(this.cache.size>100)this.cache.clear();this.cache.set(key,pattern);}return {pattern,gain:x.gain};
+          // Clip revisions are immutable, so track+slot+revision names one pattern.
+          const key=`${x.trackId}:${x.slot}:${x.revision}`;let pattern=this.cache.get(key);if(!pattern){pattern=compile(x.document.root);if(this.cache.size>100)this.cache.clear();this.cache.set(key,pattern);}return {pattern,gain:x.gain};
         }):[];
         for(const {pattern,gain} of selected){for(const hit of pattern.queryArc(begin,until,{_cps:this.bpm/240}).sort((a,b)=>Number(a.whole.begin)-Number(b.whole.begin))){if(!hit.hasOnset())continue;
           const cycle=Number(hit.whole.begin), serverMs=this.epoch+cycle*240000/this.bpm;
           const t=c.currentTime+(serverMs-now)/1000;
-          if(t<c.currentTime-0.005)continue;
+          if(t<c.currentTime-0.005){this.stats.late++;this.lagCount++;continue;}
           const value:Record<string,any>={...hit.value,gain:Number(hit.value.gain??1)*gain};
           this.render(value,Math.max(t,c.currentTime),Number(hit.duration)*240/this.bpm);
-          this.trace.push({cycle,serverMs,audioTime:t,sound:String(value.s),generation:this.generation});if(this.trace.length>256)this.trace.shift();
+          this.stats.scheduled++;this.trace.push({cycle,serverMs,audioTime:t,sound:String(value.s),generation:this.generation});if(this.trace.length>256)this.trace.shift();
         }}
         this.cursor=until;
       }
     }catch(e){this.stop();this.onError(e instanceof Error?e.message:'Audio scheduling failed.');}
+    finally{
+      this.stats.slowestTickMs=Math.max(this.stats.slowestTickMs,performance.now()-started);
+      if(this.lagCount&&performance.now()-this.lagReported>2000){this.onLag(this.lagCount);this.lagCount=0;this.lagReported=performance.now();}
+    }
   }
   private render(v:Record<string,any>,time:number,duration:number){
     const c=this.context!, sound=String(v.s??'triangle');
