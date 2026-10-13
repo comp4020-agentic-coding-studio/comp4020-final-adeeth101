@@ -1,144 +1,194 @@
 # The contract
 
-Everything in `src/` is split so that one concern lives in one file. That is
-what lets several people work at once: the boundaries below are the agreement,
-and the point of writing them down is that nobody has to read another file to
-know what their own is allowed to assume.
+What the running app promises, and where each promise lives. If a change
+needs a new route, table or limit, it is a change to this document first.
+Trade-offs behind these choices are in [architecture](architecture.md); what
+has been checked, and how, is in [verification](verification.md).
 
-If a change needs a new route or a new column, that is a change to this
-document first.
+## Modules
 
-## Modules, and who may edit what
+| Path | Holds |
+| --- | --- |
+| `shared/music.ts` | The musical model, its runtime validator and every musical limit |
+| `shared/code.ts` | Acorn allowlist parser and the deterministic Strudel printer |
+| `shared/compile.ts` | Strudel `Pattern` construction from a validated tree |
+| `shared/bots.ts` | Versioned seeded rhythm and melody generators |
+| `shared/performance.ts` | Plans, the scene/arrangement resolver and restart selection |
+| `shared/studio.ts` | Snapshot types shared by server and browser |
+| `src/server.ts` | The routing table, request limits and error statuses |
+| `src/studio.ts` | Studio schema, commands, ownership, leases, plans, SSE, import/export, legacy import |
+| `src/studio-page.ts` | Server-rendered landing page and studio shell |
+| `src/db.ts`, `src/identity.ts` | SQLite connection and the signed visitor cookie |
+| `src/events.ts`, `src/feature.ts`, `src/page.ts`, `public/app.js` | The earlier sketchpad, now served at `/legacy` |
+| `client/main.ts` | Compose and Perform pages |
+| `client/blocks.ts` | Blockly music blocks and tree adapters (loaded on demand) |
+| `client/audio.ts` | Shared-clock scheduler and bounded WebAudio output (loaded on demand) |
+| `client/drafts.ts`, `client/api.ts` | IndexedDB drafts and command requests |
+| `spec/*.test.ts`, `spec/browser/*.pw.ts` | Promises checked over HTTP, and in a real browser |
 
-| File | Holds | May be edited by |
-| --- | --- | --- |
-| `src/server.ts` | the routing table and nothing else | whoever adds a route |
-| `src/db.ts` | the SQLite connection, migrations, `setting()` | whoever adds a migration |
-| `src/identity.ts` | who a visitor is, and the cookie | identity work |
-| `src/events.ts` | the event log and the SSE fan-out | real-time work |
-| `src/markdown.ts` | markdown to HTML for `/readme/` | the README route |
-| `src/feature.ts` | **the concept**: shared state and its rules | the concept |
-| `src/page.ts` | server-rendered HTML | the interface |
-| `public/style.css`, `public/app.js` | styling, and enhancement only | the interface |
-| `spec/*.test.ts` | one file per promise being protected | whoever makes the promise |
+## The musical model
 
-`src/feature.ts` is the only file the concept needs. Nothing else in `src/`
-knows what the app is about, which is deliberate: the idea can change without
-the plumbing changing.
+One versioned JSON tree is the only shared musical truth. Blocks and the
+instrument grids edit it; supported code is parsed into it; generated Strudel
+is a view of it.
+
+```ts
+type MusicNode =
+  | { kind: 'sound'; steps: ('bd'|'sd'|'hh'|'cp'|null)[] }
+  | { kind: 'notes'; steps: (number|null)[]; synth: 'sine'|'triangle'|'square'|'sawtooth' }
+  | { kind: 'stack'; children: MusicNode[] }
+  | { kind: 'transform'; op: 'fast'|'slow'|'rev'|'gain'|'lpf'|'room'; value?: number; child: MusicNode };
+type ClipDocument = { schemaVersion: 1; root: MusicNode };
+```
+
+`validateDocument()` enforces, for every source (blocks, instruments, code,
+bots, imports and restored revisions):
+
+| Limit | Value |
+| --- | --- |
+| Steps per sequence | 1–32 |
+| Notes | integer MIDI 48–83, or rest |
+| Together (`stack`) | 2–4 children |
+| Sequences per clip | at most 4 |
+| Transforms per clip | at most 8 |
+| Tree depth | at most 8 |
+| Cells per clip | at most 128 |
+| Combined speed at a sequence | ¼× to 4×; `fast`/`slow` take 2 or 4 |
+| Steps per bar | at most 128 (each sequence's steps × its combined speed) |
+| `gain` / `lpf` / `room` | 0–1 / 100–12000 Hz / 0–0.5 |
+
+The code editor accepts one expression in this closed grammar, parsed with
+Acorn and never executed:
+
+```text
+pattern := s("tokens") | note("tokens").s("synth")
+         | stack(pattern, pattern [, pattern [, pattern]])
+         | pattern.rev() | pattern.fast(2|4) | pattern.slow(2|4)
+         | pattern.gain(n) | pattern.lpf(n) | pattern.room(n)
+```
+
+Tokens are the four drum names, MIDI integers or `~`, separated by whitespace.
+Comments, variables, functions, template strings, computed members and other
+calls are rejected. Source is at most 8 KB. When a publish includes source,
+the server re-parses it and refuses it unless it equals the submitted tree.
 
 ## Storage
 
-One SQLite database on the volume Fly mounts at `/data` — the only storage that
-outlives a restart or a redeploy. There is no database server in the course
-setup. Locally the same code uses `.data/`, so no environment variable is
-needed to run it.
+SQLite on the Fly volume at `/data` (locally `.data/`). The studio tables are
+created by migration 1 in `src/studio.ts`, recorded in `studio_migration`.
+Migrations are append-only. Before migration 1 first runs against a database
+that holds sketches, it writes a `VACUUM INTO` backup beside it.
 
 ```
-visitor   id, handle, created_at, last_seen_at
-trace     id, visitor_id, slot, body, created_at, updated_at
-event     id, visitor_id, kind, payload, created_at      -- append only
-setting   key, value                                     -- survives a redeploy
+project           id, title, created_by, created_at, updated_at, revision
+track             id, project_id, owner_id, name, position, revision, archived_at
+clip              id, track_id, slot A–D, current_revision         unique(track, slot)
+clip_revision     clip_id, revision, schema_version, document_json, source_text,
+                  provenance_json, created_by, created_at          newest 20 kept
+scene_assignment  project_id, scene, track_id, clip_slot (null = silence)
+project_settings  project_id, bpm, scene_names_json, arrangement_json, settings_revision
+transport         project_id, generation, status, epoch_ms, conductor_id, lease_until, revision
+performance_plan  project_id, generation, plan_revision, effective_cycle, plan_json
+command_receipt   visitor_id, command_id, request_hash, response_json  kept 7 days
+legacy_import     trace_id, new_clip_id, archived_source, reason
+event             (existing log) + project_id, command_id          append only
 ```
 
-`trace.slot` is how a concept addresses a unit of shared state: a track name, a
-position in a chain, the id of a line. `trace.body` is its payload, text or
-JSON. Keeping both generic is what let the plumbing be built and deployed
-before the concept was settled.
-
-Migrations in `src/db.ts` are **append-only**. Add a new statement; never edit a
-shipped one, or a redeploy meets a volume it cannot read.
-
-Nothing updates or deletes a row in `event`. Week 10's real-time replays from
-it and week 11's instruments read it, so a gap in it is a gap in both.
+The earlier `visitor`, `trace`, `event` and `setting` tables are unchanged.
+Drafts never reach the server: they live in the browser's IndexedDB, keyed by
+visitor, project, track and slot.
 
 ## HTTP
 
 | Route | Does |
 | --- | --- |
-| `GET /` | the whole page, server-rendered |
-| `GET /readme/` | `README.md` rendered to HTML; read per request, never cached |
-| `GET /healthz` | `{ok:true}`, touching neither database nor cookie |
-| `GET /static/*` | files from `public/` |
-| `GET /api/me` | `{id, handle, fresh}` |
-| `GET /api/state` | the `State` in `src/feature.ts` |
-| `POST /api/act` | the core action: `{slot, body}` sets a track's code; `{slot, step, sound?}` sets or cycles one grid step |
-| `POST /api/handle` | `{handle}`; a form post gets a 303, like `/api/act` |
-| `GET /api/events` | SSE from `?since=` or `Last-Event-ID`; replays the whole backlog after it, then stays open |
+| `GET /` | Landing page: create a piece, recent pieces |
+| `GET /p/:id/compose`, `GET /p/:id/perform` | Server-rendered shell for the two studio pages |
+| `GET /readme/` | `README.md` rendered per request |
+| `GET /healthz` | `{ok:true}`; no database, no cookie |
+| `GET /assets/*`, `GET /static/*` | Built client bundles; stylesheets and legacy script |
+| `GET /api/time` | `{serverNowMs}` for clock calibration |
+| `POST /api/projects` | Create a piece; JSON gets 201 `{id}`, a form post gets 303 to Compose |
+| `GET /api/projects/:id` | Consistent snapshot plus event cursor, read in one transaction |
+| `POST /api/projects/:id/commands` | Every project mutation (below) |
+| `GET /api/projects/:id/events` | Project SSE: replay after `Last-Event-ID`/`?since`, then live |
+| `POST /api/projects/:id/presence` | Ephemeral heartbeat `{route}`; never written to the event log |
+| `GET /api/projects/:id/export` | Project JSON download, without identity material |
+| `POST /api/import` | Import project JSON (≤512 KB) as a new piece owned by the importer |
+| `GET /api/me`, `POST /api/handle` | Visitor identity and display name |
+| `GET /legacy`, `/api/state`, `/api/act`, `/api/events` | The earlier sketchpad, unchanged |
+| `GET /archive` | Earlier sketches that could not be imported, kept verbatim |
 
-**Who a visitor is.** Every response to a new browser sets a signed `visitor`
-cookie, but nothing is written until that visitor first writes something
-(`POST /api/act` or `/api/handle`). Before then they are real enough to be
-shown a stable handle, derived from their id, and the state as everyone else
-sees it, with nothing marked `mine`. A request with no cookie is simply that: a
-new visitor who hasn't written anything yet. So `GET /api/state` without a
-cookie answers 200 with the shared state, rather than refusing. Crawlers and
-uptime checks never send the cookie back; creating a row for each of them
-would fill the table with people who were never there.
+A command is `{commandId: UUID, type, expectedRevision, payload}`:
 
-Three rules hold across all of them:
+| Command | Who | Revision checked |
+| --- | --- | --- |
+| `track.create` | anyone; 12 active per piece, 2 per person | none (capacity checked in the transaction) |
+| `track.rename`, `track.archive`, `track.restore` | track owner | track |
+| `clip.publish`, `clip.restore` | track owner | clip (0 for an empty slot) |
+| `scene.assign`, `track.launch`, `track.follow`, `track.mix` | track owner | track |
+| `conductor.claim` / `.release` | anyone when free or expired / holder | transport |
+| `conductor.renew` | holder (no event written) | none |
+| `transport.start`, `.stop`, `scene.launch`, `arrangement.start`, `.stop` | conductor | transport |
+| `tempo.set` (stopped only), `scene.rename`, `arrangement.save` | conductor | settings |
 
-- **`POST /api/act` answers a form post with a 303 to `/`, and a fetch with
-  JSON.** The page works with no JavaScript at all, and `public/app.js` only
-  avoids the reload. A change that breaks the plain form post breaks the app on
-  a slow or hostile connection, which is the band the brief calls "use it
-  wasn't designed for".
-- **Looking writes nothing.** Only a write creates a visitor row or appends to
-  the event log. `spec/persistence.test.ts` holds this.
-- **A refused action is not an error.** `act()` returns `{ok:false, error,
-  status}` and the person is shown `error`. The rule a concept enforces is
-  refused here, in one place, and shown rather than swallowed.
+Success is `{ok, commandId, projectRevision, entityId, entityRevision, eventId,
+effectiveCycle?}`. Statuses: 400 malformed JSON, 403 not yours / not
+conducting / cross-site, 404 unknown, 409 stale revision, capacity or lease
+conflict (with the current entity), 413 body over 64 KB, 415 not JSON, 422
+invalid value, 429 rate limited (burst 20, then 5 per second, `Retry-After`).
+A retried command ID returns its first result without a second effect; the
+same ID with a different body is 409.
 
-The identity cookie is `HttpOnly`, and `Secure` behind HTTPS: the signed value
-is the visitor's identity, and no script on the page needs it.
+Rules that hold across commands:
 
-## Tracks
+- **The server decides.** Ownership, lease and revision are checked in the
+  transaction; disabled buttons only explain.
+- **Commit, then announce.** A command's rows and its event commit together;
+  SSE hears it only after commit, and a rollback announces nothing.
+- **Conducting is not owning.** The conductor controls transport, scenes and
+  the arranger, never another person's clips or mix.
+- **Saving is not playing.** A publish is visible at once; the ensemble adopts
+  it at the next bar at least one second away.
 
-- **One track per visitor, owned from its first write.** The server derives a
-  visitor's track from their id (`trackOf()` in `src/identity.ts`). That is the
-  only track they may start; a track they already own under another name stays
-  theirs. Writing to someone else's track, or starting one that isn't yours, is
-  a 403 — including a track whose owner hasn't written yet.
-- **The code string is the only copy.** `steps` is derived from `body` on every
-  read and never stored, so the grid and the code cannot disagree.
-- **The grid edits only what it can read exactly:** one `s("...")` of plain
-  sound names and `~`, at most 32 steps. Anything else is hand-written code. It
-  is kept as written, shown without a grid, and a grid press on it is a 409 —
-  the grid never overwrites code it only half understands.
-- **A trace with no slot is a note**, from before the instrument. Notes are kept
-  and shown, but not counted, not called code and never played.
+## Live updates
+
+SSE events are small invalidations `{projectId, projectRevision, kind,
+entityId, commandId}`; clients then fetch a snapshot. More than 500 missed
+events produce one `reset`. A named `beat` event every 5 s lets a page notice a
+dead connection within 8 s. Streams are limited to 2 per person per piece and
+64 in total; a refused page polls the snapshot every second and says so. A
+stream with more than 128 KB unsent is closed rather than buffered.
+
+## Performance plans and time
+
+One cycle is one four-beat bar; cycles per second is BPM / 240. A plan holds
+the catalog (track → slot → immutable clip revision), mix, scene assignments,
+manual overrides, current scene and an optional arrangement snapshot. At cycle
+`c` the plan with the highest `effectiveCycle ≤ c` applies. Live changes take
+effect at the first bar starting at least 1000 ms ahead, and later commands for
+the same boundary accumulate. The conductor lease lasts 30 s and the Perform
+page renews it every 10 s.
+
+A restart stops the ensemble, releases the podium and records
+`transport.reset`. It keeps the plan that was sounding at the last durable
+write for that piece and cancels anything queued after it. Saved music, mix
+and arrangement survive; sound never resumes on its own.
 
 ## Sound
 
-Evaluated only in the listener's browser, never on the server, with
-`@strudel/web` pinned and fetched only when someone presses Play. What plays:
-every grid-shaped track in the room — its code can only be `s("...")` of plain
-names, so it can do nothing but make sound — and your own code. Other people's
-hand-written code is not played, because Strudel runs it as JavaScript in your
-page. Opening that up needs a real boundary (per-revision consent, or proper
-isolation), which is a design of its own.
+Each browser renders its own audio after a local gesture. The server never
+renders or streams sound. `client/audio.ts` queries Strudel patterns built
+from validated trees at global cycles and schedules native WebAudio voices
+about 160 ms ahead. Drums are synthesised (no sample downloads); notes use
+oscillator waveforms. Solo and device volume are local. If a device falls
+behind, skipped sounds are counted and reported on the page.
 
 ## What is fixed by the course
 
-From `fly.toml` and `spec/invariants.test.ts`, none of it ours to change:
+From `fly.toml` and `spec/invariants.test.ts`:
 
 - one `shared-cpu-1x` machine, 256 MB, one volume at `/data`
 - the app serves HTTP on `0.0.0.0:$PORT`; Fly terminates TLS in front of it
-- the machine **stops when idle and starts on the next request**, so a restart
-  is routine. Nothing may live only in memory
-- `/` answers 200, and `/readme/` carries every `README.md` heading, in order,
-  in the HTML body — no script runs when the marker reads it
-
-## Running it
-
-```
-pnpm dev        # with a reload, on 8080, database in .data/
-pnpm start      # as the container runs it
-pnpm check      # typecheck, then every spec against a running app
-```
-
-`pnpm check` expects the app at `APP_URL` (default `http://localhost:8080`).
-`spec/persistence.test.ts` is the exception: it starts and kills its own server
-on a spare port, because the only way to test a restart is to perform one.
-
-To run a second copy alongside the first, give it its own `PORT`, `APP_URL`
-and `DB_PATH`, so two checks never fight over a port or a database.
+- the machine stops when idle and starts on the next request
+- `/` answers 200, and `/readme/` carries every `README.md` heading in order

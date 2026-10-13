@@ -1,12 +1,11 @@
-# A shared Strudel space
+# Stream · a shared Strudel studio
 
-A multi-user [Strudel](https://strudel.cc/) environment that is both a visual
-step sequencer and a raw live-coding text editor over one shared state.
-Visitors share a space; each one gets a track. The server synchronises and
-persists that shared state and never touches audio — each browser evaluates
-the pattern locally with the Strudel REPL. The grid is a view over a canonical
-pattern shape; code outside that shape stays text-only rather than being
-rewritten by a grid that only half-understands it.
+A multi-user [Strudel](https://strudel.cc/) studio with connected musical
+blocks, instrument grids and editable code over one shared musical model.
+Create a piece, add drums or melody, and share its link. Each participant
+owns up to two tracks. Apply a draft to publish it; switch to Perform to
+launch scenes, mix tracks and conduct an arrangement. Each browser makes
+its own sound after the listener enables audio.
 
 ## What good means for this app
 
@@ -24,39 +23,79 @@ To evaluate if this product is "good", I will consider three things:
 
 These are objectives to test with people, not end-states defined by the current validation processes.
 
-Version One: Establishing Visitor Identity, Contributions, and Grid/Code Mapping
-Version One provides visitors with persistent identity and contributions as well as a mapping between the grid and code. Currently, the visible interface allows for text contributions, but other interfaces (sequencer controls and Strudel playback) are still being developed. Version One illustrates the foundation for persistent data and states the intent for establishing that the musical experience aligns with this definition of good.
-
 Research leading up to this design considered existing live coding environments and the relationship between accessible entryways and opportunities for more expressive use. My objective is to combine those attributes in a shared space without requiring all users to interact through the same interface.
+
+The implementation uses [Blockly's connected blocks](https://docs.blockly.com/guides/get-started/what-is-blockly/)
+and [Strudel's pattern model](https://strudel.cc/technical-manual/repl/).
+Further comparisons are collected in [research](docs/research.md).
+
+## Current state
+
+Built: persistent pieces shared by link, up to two owned tracks per person and
+twelve per piece, four clips per track, and three views of each clip (Blocks
+with a keyboard form editor, Instruments, Code). Rhythm and melody helpers
+propose reproducible drafts that stay manual. The Perform page has a leased
+conductor role, four scenes, a mixer with manual overrides and local solo, and
+an eight-entry arranger. Conflicting edits, lost connections and restarts keep
+drafts and say what happened.
+
+Checked by automated tests in a production build and container: see
+[verification](docs/verification.md). Not yet done: an uncoached evaluation
+with people, listening review on real devices, a phone-hardware measurement,
+and anything on a deployed URL. The objectives above remain to be tested.
+
+## Supported musical scope
+
+Shared clips support plain sound/note sequences, parallel patterns, speed,
+reverse, gain, filter and reverb, up to 128 steps per bar per clip (a limit
+set by measuring the browser scheduler). Code is parsed into a bounded tree,
+never executed as JavaScript. Unsupported source stays a local draft with a clear
+error and copy/export options. See [the contract](docs/contract.md) for limits.
+Drums are synthesised locally; exported Strudel can sound different with
+another sample bank. Sound stops on a disconnected device or server restart.
 
 ## Running it
 
 ```
 mise exec -- pnpm dev       # with a reload, on 8080, database in .data/
+mise exec -- pnpm build     # bundle the browser editors and audio
 mise exec -- pnpm start     # as the container runs it
 mise exec -- pnpm check     # typecheck, then every spec against a running app
+mise exec -- pnpm test:browser # production browser flows; install Chromium first
 ```
 
 `pnpm check` expects the app already running at `APP_URL` (default
-`http://localhost:8080`).
+`http://localhost:8080`). To check the image CI deploys:
+
+```
+docker build -t stream .
+docker run --rm -d --init -p 8080:8080 --tmpfs /data -m 256m stream
+CI=true pnpm check && pnpm test:browser
+```
+
+`CI=true` skips the one spec that edits `README.md` on disk, which a container
+cannot see. `pnpm test:audio` runs the two-browser timing probe and
+`node scripts/load-proof.mjs` the twelve-track load probe; both print
+measurements rather than pass or fail.
 
 ## Architecture
 
-Node's built-in HTTP server and SQLite, no runtime dependencies and no build
-step, on one 256 MB Fly machine with a single volume at `/data`. The full
-module boundaries and HTTP contract are written down in
-[`docs/contract.md`](docs/contract.md); in short:
+Node's HTTP server and SQLite run on one 256 MB Fly machine with a volume at
+`/data`. Vite bundles the browser UI; Acorn validates supported code on both
+client and server. [The contract](docs/contract.md) describes the architecture:
 
-- `src/feature.ts` holds the concept — shared state and its rules — and is the
-  only file in `src/` that knows what the app is about.
+- `shared/` holds the musical model, code mapping, generators and scene resolver.
+- `src/studio.ts` owns projects, revisions, commands and live events.
+- `client/` provides editing views and the shared-clock WebAudio output.
+- [Architecture decisions](docs/architecture.md) records the trade-offs and
+  [verification](docs/verification.md) what was checked, how and when.
 - `src/server.ts` is the routing table; `src/db.ts` is the SQLite connection
   and migrations; `src/identity.ts` is who a visitor is; `src/events.ts` is
   the event log and SSE fan-out; `src/page.ts` is the server-rendered HTML;
   `src/markdown.ts` renders this file at `/readme/`.
 - One SQLite database on the volume Fly mounts at `/data`; locally the same
   code uses `.data/`.
-- `POST /api/act` answers a form post with a 303 redirect and a fetch with
-  JSON, so the page works with no JavaScript at all.
+- Earlier sketches remain at `/legacy`; the interactive studio needs JavaScript.
 - A refused action is not an error: `act()` returns `{ok:false, error,
   status}` and the error is shown, not swallowed.
 
@@ -71,3 +110,8 @@ change:
   routine — nothing may live only in memory.
 - `/` answers 200, and `/readme/` carries every heading from this file, in
   order, in the rendered HTML — no script runs when the marker reads it.
+
+## Source and licence
+
+[Application source](https://github.com/comp4020-agentic-coding-studio/comp4020-final-Adeeth101)
+is provided under AGPL-3.0-or-later. See [dependency and audio notices](THIRD_PARTY.md).
