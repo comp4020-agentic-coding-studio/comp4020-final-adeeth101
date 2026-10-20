@@ -16,6 +16,7 @@ What the agent needs to carry from any of it is your call.
 - Track ownership and revision checks are enforced on the server. Conducting never grants clip ownership.
 - Shared performance follows durable plans on a common clock; editing must not reset musical phase.
 - A database mutation and its event commit together. Broadcast only after commit.
+- Every committed change and every refused command logs who did what, server-side, via `logAction` in `src/events.ts`. Never log clip source, trace text or cookies.
 - Preserve musical data and legacy source during migrations. A restart stops transport, not saved composition.
 - Core controls must work by keyboard and at both marking viewports; provide the form alternative to dragging blocks.
 - Run `pnpm check` and `pnpm test:browser` against production assets. Check evidence before shipping.

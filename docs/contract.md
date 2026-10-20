@@ -148,8 +148,25 @@ Rules that hold across commands:
   SSE hears it only after commit, and a rollback announces nothing.
 - **Conducting is not owning.** The conductor controls transport, scenes and
   the arranger, never another person's clips or mix.
+- **Seeing is the link.** Anyone holding a piece's URL sees every track, clip,
+  revision and who owns each. A piece is made to be played together in one
+  room, so hiding a part would only stop others copying it into their own
+  track; there is nothing private in it, and export carries no identity
+  material.
 - **Saving is not playing.** A publish is visible at once; the ensemble adopts
   it at the next bar at least one second away.
+
+## Who did what: the server log
+
+Every committed change, every refused command and each person's first
+presence in a piece writes one JSON line to stdout, which is what
+`flyctl logs` shows. A line names `who` (handle) and `visitor` (first 8 of the
+id, since two handles can match), the `kind` (`track.create`, `clip.publish`,
+`clip.publish.refused`, `presence.join`, …), the piece, and for a track its
+name and `owner`. Refusals are `level: "warn"` with the status and reason.
+Lines are written after commit, so the log never names a change that rolled
+back, and never carry clip source, trace text or cookies. `spec/logging.test.ts`
+holds this.
 
 ## Live updates
 

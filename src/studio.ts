@@ -2,6 +2,7 @@ import {randomUUID,createHash} from 'node:crypto';
 import type {ServerResponse} from 'node:http';
 import {db} from './db.ts';
 import {persist,type Visitor} from './identity.ts';
+import {logAction} from './events.ts';
 import {emptyClip,validateDocument} from '../shared/music.ts';
 import {parseCode} from '../shared/code.ts';
 import {blankPlan,nextBoundary,sceneAt,cycleAt,planAt,planAtRestart,SLOTS,type Slot,type Plan} from '../shared/performance.ts';
@@ -48,7 +49,10 @@ export class CommandError extends Error {
 function need(test:unknown,message:string,status=422):asserts test {if(!test)throw new CommandError(message,status);}
 const text=(x:unknown,max:number)=>{need(typeof x==='string'&&x.trim().length>0&&x.length<=max,`Use 1–${max} characters.`);return (x as string).trim();};
 const slot=(x:unknown):Slot=>{need(SLOTS.includes(x as Slot),'Choose clip or scene A–D.');return x as Slot;};
-function emit(projectId:string,eventId:number,kind:string,entityId:string|null,commandId:string|null){
+// Track name and owner turn an id into something a person can narrate from the logs.
+const trackLabel=(trackId:unknown)=>{const t=typeof trackId==='string'?one('select t.name,v.handle as owner from track t join visitor v on v.id=t.owner_id where t.id=?',trackId):undefined;return t?{track:t.name,owner:t.owner}:{};};
+function emit(v:Visitor,projectId:string,eventId:number,kind:string,entityId:string|null,commandId:string|null){
+  logAction(v,kind,{project:projectId.slice(0,8),event:eventId,...(entityId?{entity:entityId.slice(0,8)}:{}),...trackLabel(entityId)});
   const revision=one('select revision from project where id=?',projectId)?.revision??0;
   const data=JSON.stringify({projectId,projectRevision:revision,kind,entityId,commandId});
   for(const {res} of listeners.get(projectId)??[]){if(res.writableLength>128*1024){res.end();continue;}res.write(`id: ${eventId}\nevent: change\ndata: ${data}\n\n`);}
@@ -79,7 +83,7 @@ function newTrack(v:Visitor,id:string,name:string,kind:'drums'|'melody',archived
 }
 export function createProject(v:Visitor,rawTitle:unknown){
   const title=text(rawTitle??'Untitled piece',60);db.exec('begin immediate');
-  try{const id=newProject(v,title),eid=event(id,v.id,'project.created',id,null);db.exec('commit');emit(id,eid,'project.created',id,null);return {id};}catch(e){db.exec('rollback');throw e;}
+  try{const id=newProject(v,title),eid=event(id,v.id,'project.created',id,null);db.exec('commit');emit(v,id,eid,'project.created',id,null);return {id};}catch(e){db.exec('rollback');throw e;}
 }
 function plansFor(id:string,generation:number):Plan[]{return rows('select plan_json from performance_plan where project_id=? and generation=? order by effective_cycle,plan_revision',id,generation).map(x=>JSON.parse(x.plan_json));}
 export function snapshot(id:string,v:Visitor):Snapshot {
@@ -209,8 +213,12 @@ export function command(v:Visitor,id:string,input:Record<string,any>){
     const result={ok:true,commandId:cid,projectRevision:Number(project!.revision)+(silent?0:1),entityId,entityRevision,eventId:eid,...(effectiveCycle!==undefined?{effectiveCycle}:{})};
     run('insert into command_receipt values(?,?,?,?,?)',v.id,cid,hash,JSON.stringify(result),now);
     run('delete from command_receipt where created_at<?',now-7*86400000);
-    db.exec('commit');if(!silent)emit(id,eid,type,entityId,cid);return result;
-  }catch(e){db.exec('rollback');if(e instanceof CommandError)throw e;throw new CommandError(e instanceof Error?e.message:'Invalid command.');}
+    db.exec('commit');if(!silent)emit(v,id,eid,type,entityId,cid);return result;
+  }catch(e){
+    db.exec('rollback');const refused=e instanceof CommandError?e:new CommandError(e instanceof Error?e.message:'Invalid command.');
+    // A refusal is the other half of who-did-what: someone tried to change what isn't theirs.
+    logAction(v,`${type}.refused`,{project:id.slice(0,8),status:refused.status,reason:refused.message,...trackLabel(payload.trackId)},'warn');throw refused;
+  }
 }
 export function projectStream(id:string,v:Visitor,res:ServerResponse,cursor:number){
   need(one('select id from project where id=?',id),'Piece not found.',404);
@@ -228,7 +236,7 @@ export function projectStream(id:string,v:Visitor,res:ServerResponse,cursor:numb
 export function updatePresence(id:string,v:Visitor,route:unknown){
   need(one('select id from project where id=?',id),'Piece not found.',404);const p=presence.get(id)??new Map();
   for(const [key,value] of p)if(value.until<Date.now())p.delete(key);
-  need(p.has(v.id)||p.size<64,'Presence capacity reached.',429);p.set(v.id,{handle:v.handle,route:route==='perform'?'perform':'compose',until:Date.now()+30000});presence.set(id,p);
+  need(p.has(v.id)||p.size<64,'Presence capacity reached.',429);if(!p.has(v.id))logAction(v,'presence.join',{project:id.slice(0,8),route:route==='perform'?'perform':'compose'});p.set(v.id,{handle:v.handle,route:route==='perform'?'perform':'compose',until:Date.now()+30000});presence.set(id,p);
 }
 export function exportProject(id:string,v:Visitor){const s=snapshot(id,v);return {format:'stream',schemaVersion:1,title:s.title,settings:s.settings,tracks:s.tracks.filter(t=>!t.archivedAt).map(t=>({id:t.id,name:t.name,clips:Object.fromEntries(Object.entries(t.clips).map(([slot,c])=>[slot,{document:c!.document,source:c!.source,provenance:c!.provenance}]))})),plan:s.plans.at(-1)};}
 export function importProject(v:Visitor,input:Row){
@@ -260,7 +268,7 @@ export function importProject(v:Visitor,input:Row){
     }
     if(input.plan?.scene!==undefined)p.scene=slot(input.plan.scene);
     savePlan(id,p);
-    const eid=event(id,v.id,'project.imported',id,null);db.exec('commit');emit(id,eid,'project.imported',id,null);return {id};
+    const eid=event(id,v.id,'project.imported',id,null);db.exec('commit');emit(v,id,eid,'project.imported',id,null);return {id};
   }catch(e){db.exec('rollback');throw e;}
 }
 // Import each old trace once, preserving unsupported code verbatim as an archive.
@@ -291,7 +299,7 @@ for(const t of rows("select * from transport where status='playing' or conductor
     const plans=plansFor(t.project_id,t.generation),bpm=one('select bpm from project_settings where project_id=?',t.project_id)!.bpm;
     const lastWrite=Math.max(Number(one('select max(created_at) as at from performance_plan where project_id=? and generation=?',t.project_id,t.generation)?.at??0),Number(one('select max(created_at) as at from event where project_id=?',t.project_id)?.at??0));
     const p=planAtRestart(plans,t.status==='playing'?t.epoch_ms:null,bpm,lastWrite);p.generation=t.generation+1;p.effectiveCycle=0;p.planRevision=0;p.arrangement=null;
-    run("update transport set status='stopped',epoch_ms=null,conductor_id=null,lease_until=0,generation=generation+1,revision=revision+1 where project_id=?",t.project_id);savePlan(t.project_id,p);event(t.project_id,null,'transport.reset',null,null);db.exec('commit');
+    run("update transport set status='stopped',epoch_ms=null,conductor_id=null,lease_until=0,generation=generation+1,revision=revision+1 where project_id=?",t.project_id);savePlan(t.project_id,p);event(t.project_id,null,'transport.reset',null,null);db.exec('commit');logAction(null,'transport.reset',{project:t.project_id.slice(0,8)});
   }catch(e){db.exec('rollback');throw e;}
 }
 export function listProjects(){return rows('select id,title from project order by updated_at desc limit 24');}

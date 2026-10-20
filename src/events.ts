@@ -40,7 +40,25 @@ export function record(
   return event;
 }
 
+const handleOf = db.prepare("select handle from visitor where id = ?");
+
+// One JSON line per action on stdout, which is what `flyctl logs` shows: who
+// (handle and short id) did what. Called only once a change has committed, or
+// for a refusal, so the log never names a change that rolled back. Clip source
+// and trace bodies stay out: the log says who, not what they wrote.
+export function logAction(
+  who: { id: string; handle?: string } | null,
+  kind: string,
+  fields: Record<string, unknown> = {},
+  level: "info" | "warn" = "info",
+): void {
+  const handle = who ? (who.handle ?? (handleOf.get(who.id) as { handle: string } | undefined)?.handle) : "system";
+  console.log(JSON.stringify({ at: Date.now(), level, who: handle ?? "unsaved visitor", visitor: who?.id.slice(0, 8) ?? null, kind, ...fields }));
+}
+
 export function publish(event: Event): void {
+  const { id } = JSON.parse(event.payload) as { id?: unknown };
+  logAction(event.visitor_id ? { id: event.visitor_id } : null, event.kind, { event: event.id, ...(id !== undefined ? { entity: id } : {}) });
   for (const listener of listeners) {
     // One broken subscriber must not stop the others, or lose the write.
     try {
