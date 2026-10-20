@@ -50,7 +50,7 @@ test('compose and perform work from the keyboard at phone size without sideways 
   await page.getByRole('button',{name:'+ Drums',exact:true}).focus();await page.keyboard.press('Enter');
   const kick=page.getByRole('button',{name:'Kick step 1',exact:true});await kick.focus();await page.keyboard.press('Space');await expect(kick).toHaveAttribute('aria-pressed','true');
   // The form editor is the non-drag route through Blocks.
-  await page.locator('#mode-blocks').focus();await page.keyboard.press('Enter');
+  await page.locator('#mode-blocks').focus();await page.keyboard.press('Enter');await expect(page.locator('#mode-blocks')).toHaveAttribute('aria-pressed','true');
   await page.locator('#effect-op').selectOption('slow');await page.locator('#add-effect').focus();await page.keyboard.press('Enter');
   await expect(page.locator('.block-form legend').first()).toHaveText('slow');
   await page.locator('#mode-code').focus();await page.keyboard.press('Enter');await expect(page.locator('#clip-code')).toHaveValue(/\.slow\(2\)$/);
