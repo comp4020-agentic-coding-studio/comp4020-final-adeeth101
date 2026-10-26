@@ -130,8 +130,12 @@ const server = createServer(async (req, res) => {
     }
 
     if(method === 'POST'){
+      // A sandboxed or file:// page sends "Origin: null", which is not a URL.
+      // Anything that will not parse is treated as another site rather than as
+      // a reason to fail: before this, it threw and the server answered 500.
       const origin=req.headers.origin;
-      if(req.headers['sec-fetch-site']==='cross-site'||(origin&&new URL(origin).host!==req.headers.host))return json(res,403,{error:'Send changes from this studio.'});
+      const foreign=origin===undefined?false:(()=>{try{return new URL(origin).host!==req.headers.host;}catch{return true;}})();
+      if(req.headers['sec-fetch-site']==='cross-site'||foreign)return json(res,403,{error:'Send changes from this studio.'});
     }
 
     if (path.startsWith("/static/")) {
@@ -236,7 +240,10 @@ const server = createServer(async (req, res) => {
     if(path==='/friends')return html(res,200,await appPage({view:'friends'}),{...PRIVATE,...cookie(visitor)});
     if(path==='/discover')return html(res,200,await appPage({view:'discover'}),{...PRIVATE,...cookie(visitor)});
     const invitePage=path.match(/^\/invite\/([0-9a-f-]+)$/);
-    if(invitePage)return html(res,200,await appPage({view:'invite',invitationId:invitePage[1]}),{...PRIVATE,'referrer-policy':'no-referrer',...cookie(visitor)});
+    // The invitation token is in the fragment, which is never sent anywhere;
+    // same-origin keeps the invitation URL itself out of other sites' logs
+    // while leaving same-origin form posts working.
+    if(invitePage)return html(res,200,await appPage({view:'invite',invitationId:invitePage[1]}),{...PRIVATE,'referrer-policy':'same-origin',...cookie(visitor)});
     if(path === '/')return html(res,200,await appPage({view:'play'}),{...PRIVATE,...cookie(visitor)});
     if(path === '/archive')return html(res,200,readmePage(`<h1>Earlier source sketches</h1>${archiveHtml()}`),cookie(visitor));
     if (path === "/legacy") {

@@ -98,7 +98,9 @@ test('keyboard only at phone size: start, add, open a part, apply Shape, close, 
   const AxeBuilder=(await import('@axe-core/playwright')).default;
   const ctx=await browser.newContext({viewport:{width:390,height:844},hasTouch:true});const page=await ctx.newPage();
   await page.goto('/');await page.getByRole('button',{name:'Start a mix'}).focus();await page.keyboard.press('Enter');await page.waitForURL(/\/p\//);
-  await expect(page.locator('#status-line')).not.toContainText('Reconnecting');
+  // The room is ready once it has its first snapshot: the status line says
+  // something and the tray has its sounds.
+  await expect(page.locator('#status-line')).toContainText(/hosting|playing|Stopped/);
   const add=page.getByRole('button',{name:'Add and play Pocket'});await add.focus();await page.keyboard.press('Enter');
   await expect(page.locator('.performer[data-part]')).toHaveCount(1);
   await page.getByRole('button',{name:'Close the sound tray'}).focus();await page.keyboard.press('Enter');

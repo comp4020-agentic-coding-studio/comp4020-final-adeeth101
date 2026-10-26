@@ -116,3 +116,37 @@ describe('roles',()=>{
     expect(s.members).toHaveLength(9);
   });
 });
+
+describe('the origin check',()=>{
+  it('refuses an opaque or foreign origin without failing, and lets an ordinary form post through',async()=>{
+    const v=await visitor(base);
+    const send=(origin?:string)=>fetch(`${base}/api/projects`,{method:'POST',redirect:'manual',
+      headers:{cookie:v.cookie,'content-type':'application/x-www-form-urlencoded',accept:'text/html',...(origin===undefined?{}:{origin})},body:''});
+    // "Origin: null" comes from sandboxed and file:// pages; it is not a URL.
+    for(const origin of ['null','https://foreign.example','not a url'])
+      expect((await send(origin)).status,origin).toBe(403);
+    // A no-script browser posting the home page form: same site, so it works.
+    const host=new URL(base).origin;
+    const ok=await send(host);
+    expect(ok.status).toBe(303);expect(ok.headers.get('location')).toMatch(/^\/p\/[0-9a-f-]+/);
+    // And with no Origin header at all, as some browsers send for a top-level form post.
+    const bare=await send();
+    expect(bare.status).toBe(303);
+  });
+});
+
+describe('without JavaScript',()=>{
+  it('a plain form post still starts a mix and lands in its room',async()=>{
+    const v=await visitor(base);
+    const res=await fetch(`${base}/api/projects`,{method:'POST',redirect:'manual',headers:{
+      cookie:v.cookie,'content-type':'application/x-www-form-urlencoded',
+      accept:'text/html,application/xhtml+xml',origin:new URL(base).origin,'sec-fetch-site':'same-origin'},body:''});
+    expect(res.status).toBe(303);
+    const room=res.headers.get('location')!;
+    expect(room).toMatch(/^\/p\/[0-9a-f-]+/);
+    // The room's own HTML names the mix, so a no-script browser sees something.
+    const page=await fetch(`${base}${room}`,{headers:{cookie:v.cookie}});
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('<noscript>');
+  });
+});

@@ -208,3 +208,17 @@ it("/static/app.js is enhancement only: the page already has everything it adds"
   expect(res.status).toBe(200);
   expect(res.headers.get("content-type") ?? "").toContain("javascript");
 });
+
+// Found by running the home page with JavaScript switched off: the page asked
+// browsers for no-referrer, which makes Chrome send "Origin: null" on a form
+// post, which the origin check correctly reads as another site. The no-script
+// route to Start a mix was refused with a 403, and the browser was left
+// looking at /api/projects. The page now asks for same-origin, which still
+// sends nothing to other sites.
+it("asks for a referrer policy that leaves same-origin form posts working", async () => {
+  const html = await (await fetch(new URL("/", baseUrl))).text();
+  const meta = html.match(/<meta name="referrer" content="([^"]+)">/);
+  expect(meta?.[1], "the shell sets no referrer policy").toBeTruthy();
+  expect(["same-origin", "strict-origin-when-cross-origin", "origin-when-cross-origin"])
+    .toContain(meta![1]);
+});

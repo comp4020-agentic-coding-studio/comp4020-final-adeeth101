@@ -136,8 +136,17 @@ export async function mountRoom(host:HTMLElement,id:string){
   }
 
   // --- sound tray ---------------------------------------------------------------------
+  // Rebuilding the tray replaces its buttons, which would drop the focus of
+  // someone working by keyboard, and with it the Enter they were about to
+  // press. Whatever was focused is restored by the action it names.
   function renderTray(){
     el.tray.hidden=!trayOpen;if(!trayOpen)return;
+    const focused=document.activeElement&&el.tray.contains(document.activeElement)
+      ?(document.activeElement as HTMLElement).dataset:null;
+    const restore=()=>{if(!focused)return;
+      const sel=focused.sound?`[data-act="${focused.act}"][data-sound="${CSS.escape(focused.sound)}"]`
+        :focused.act?`[data-act="${focused.act}"]${focused.role?`[data-role="${focused.role}"]`:''}`:null;
+      if(sel)$<HTMLElement>(sel,el.tray)?.focus({preventScroll:true});};
     const p=PACKS.find(x=>x.id===pack)!;
     const list:(Preset|{id:string;name:string;role:Role|'custom';source:string;mine:true})[]=traySource==='mine'?mySounds.map(s=>({...s,mine:true as const})):p.presets.filter(x=>filter==='all'||x.role===filter);
     const verb=!playing()&&(isHost()||!state.transport.hostId)&&online()?'Add and play':'Add';
@@ -157,6 +166,7 @@ export async function mountRoom(host:HTMLElement,id:string){
       <span class="sound-actions"><button class="ghost small" data-act="preview" data-sound="${esc(x.id)}" data-mine="${'mine' in x?1:0}" aria-pressed="${previewing===x.id}" aria-label="${previewing===x.id?'Stop preview of':'Preview'} ${esc(x.name)}">${previewing===x.id?'■':'▶'}<span class="sr-only"> preview</span></button>
       <button class="primary small" data-act="${target?'swap':'add'}" data-sound="${esc(x.id)}" data-mine="${'mine' in x?1:0}" ${state.editors.youCanEdit&&online()&&(target||active().length<12)?'':'disabled'} aria-label="${target?'Swap to':verb} ${esc(x.name)}">${target?'Swap':verb}</button></span>
     </li>`).join(''):`<li class="empty">${traySource==='mine'?'Save a part from its Code tab to keep it here.':'No sounds of that type in this pack.'}</li>`}</ul>`;
+    restore();
   }
 
   // --- drawers ---------------------------------------------------------------------------
