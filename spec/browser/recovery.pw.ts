@@ -49,3 +49,47 @@ test('a code draft survives a reload before it is applied',async({browser})=>{
   expect((await page.evaluate(()=>(window as any).ensembleDebug.snapshot())).parts[0].clips.A.revision).toBe(1);
   await ctx.close();
 });
+
+test('reduced motion stops the stage moving and still says what is playing',async({browser})=>{
+  const ctx=await browser.newContext({reducedMotion:'reduce',viewport:{width:1280,height:800}});
+  const page=await ctx.newPage();
+  await page.goto('/');await page.getByRole('button',{name:'Start a mix'}).click();await page.waitForURL(/\/p\//);
+  await page.getByRole('button',{name:/Add and play/}).first().click();
+  await expect(page.locator('.performer[data-part]')).toHaveCount(1);
+  await page.waitForTimeout(2000);
+  const motion=await page.evaluate(()=>{
+    const figure=document.querySelector('.performer[data-part] .figure')!;
+    const s=getComputedStyle(figure);
+    return {animation:s.animationName,transition:s.transitionDuration};
+  });
+  expect(motion).toEqual({animation:'none',transition:'0s'});
+  // The state is still named in words, not only by movement.
+  await expect(page.locator('.performer[data-part] .state-tag')).toHaveText(/Playing|Ready|Joining/);
+  await ctx.close();
+});
+
+test('a slow connection still gets a newcomer to sound, and a double Apply saves once',async({browser})=>{
+  const ctx=await browser.newContext({viewport:{width:1280,height:800}});
+  const page=await ctx.newPage();
+  // About a slow 3G link: 400 kbit down, 300 ms each way.
+  const cdp=await ctx.newCDPSession(page);await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions',{offline:false,latency:300,downloadThroughput:50*1024,uploadThroughput:25*1024});
+  await page.goto('/',{waitUntil:'domcontentloaded'});
+  await page.getByRole('button',{name:'Start a mix'}).click();
+  await expect(page.locator('#status-line')).toContainText(/hosting|playing|Stopped/,{timeout:60000});
+  await page.getByRole('button',{name:/Add and play/}).first().click({timeout:60000});
+  await expect(page.locator('.performer[data-part]')).toHaveCount(1,{timeout:60000});
+  await page.getByRole('button',{name:'Close the sound tray'}).click();
+  await page.locator('.performer[data-part] .performer-btn').click();
+  await page.getByRole('tab',{name:'Code'}).click();
+  await page.locator('#code-editor').fill('s("bd sd")');
+  await expect(page.locator('#code-error')).toContainText('not shared yet');
+  // Two Applies on a laggy link must leave one part at one new revision.
+  const apply=page.getByRole('button',{name:'Apply to mix'});
+  await apply.click();
+  await apply.click({timeout:2000}).catch(()=>{});
+  await expect.poll(()=>page.evaluate(()=>(window as any).ensembleDebug.snapshot().parts[0].clips.A.source),{timeout:60000}).toBe('s("bd sd")');
+  const after=await page.evaluate(()=>{const s=(window as any).ensembleDebug.snapshot();return {parts:s.parts.filter((p:any)=>!p.archivedAt).length,revision:s.parts[0].clips.A.revision};});
+  expect(after).toEqual({parts:1,revision:2});
+  await ctx.close();
+});
