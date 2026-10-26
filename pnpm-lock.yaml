@@ -30,9 +30,6 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.6
-      blockly:
-        specifier: 13.3.0
-        version: 13.3.0(jsdom@29.1.1)
       jsdom:
         specifier: ^29.1.1
         version: 29.1.1
@@ -454,12 +451,6 @@ packages:
 
   bidi-js@1.1.0:
     resolution: {integrity: sha512-fX1Onk0tdVPC7obPWB5EbJ1z7NVhLq4m2xZLq2YXBkxzMXIGRpNMU88n0EPgWseKl12J7zXs7qrDxPK4sRs2fg==}
-
-  blockly@13.3.0:
-    resolution: {integrity: sha512-qAHFGMGTSF67Lupr3pjZz9LQu4JCFdN76CMZxegBKiveZreK08yXhaCz0g9q9/xe5GEdoeFT3POAlQavPIRPEw==}
-    engines: {node: '>=22'}
-    peerDependencies:
-      jsdom: '>=27.4.0 <30.0.0'
 
   chai@6.2.2:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
@@ -1105,10 +1096,6 @@ snapshots:
   bidi-js@1.1.0:
     dependencies:
       require-from-string: 2.0.2
-
-  blockly@13.3.0(jsdom@29.1.1):
-    dependencies:
-      jsdom: 29.1.1
 
   chai@6.2.2: {}
 

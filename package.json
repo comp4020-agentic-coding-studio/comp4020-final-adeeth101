@@ -21,7 +21,6 @@
     "@strudel/mini": "1.2.6",
     "@types/jsdom": "^28.0.3",
     "@types/node": "^24.0.0",
-    "blockly": "13.3.0",
     "jsdom": "^29.1.1",
     "typescript": "^6.0.3",
     "vite": "8.3.4",
