@@ -11,7 +11,7 @@ import {addEvent,broadcast,openStream,revalidate,scopeListeners} from './hub.ts'
 import {announce,replan,chatRow,chatBody,editCapacity,heartbeat,ROOM_LIMITS} from './studio.ts';
 import {parseSource} from '../shared/expr.ts';
 import {presetById,roleOf} from '../shared/presets.ts';
-import {SLOTS,type Plan} from '../shared/performance.ts';
+import {SLOTS,publishedPlan,type Plan} from '../shared/performance.ts';
 import type {AudienceSnapshot} from '../shared/studio.ts';
 
 type Row=Record<string,any>;
@@ -77,9 +77,13 @@ export function audienceSnapshot(v:Visitor,performanceId:string):AudienceSnapsho
   const here=listenersOf(p.id),full=a.role==='listener'&&!here.has(v.id)&&here.size>=LIVE_LIMITS.listeners;
   const live=p.status==='live'&&!full,t=one('select * from transport where project_id=?',p.project_id)!,bpm=one('select bpm from project_settings where project_id=?',p.project_id)!.bpm;
   const part=one('select * from performance_participant where performance_id=? and visitor_id=?',p.id,v.id);
-  // Published mix: only the plan, reduced to what is sounding. Draft source,
-  // history, members, chat and invitations are never included.
-  const plans=live?plansFor(p.project_id,t.generation).map(plan=>({...plan,catalog:Object.fromEntries(Object.entries(plan.catalog).map(([trackId,clips])=>[trackId,Object.fromEntries(Object.entries(clips).map(([s,c])=>[s,{revision:c!.revision,document:c!.document}]))]))})):[];
+  // Published mix: each plan reduced to the musical revisions this
+  // performance can reach (publishedPlan in shared/performance.ts). A clip no
+  // scene, override or running arrangement selects is the project members’
+  // own workspace and never reaches a listener; the plan that first needs one
+  // carries it, at the bar that change takes effect. Source, history,
+  // provenance, drafts, members and chat are never included.
+  const plans=live?plansFor(p.project_id,t.generation).map(publishedPlan):[];
   const parts=live?rows('select t.id,t.name,t.role,t.guest_performance_id,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null order by t.position',p.project_id).map(x=>({id:x.id,name:x.name,role:roleOf(x.role),addedBy:x.handle,guest:!!x.guest_performance_id})):[];
   const performers=rows("select pp.visitor_id,pp.role,v.handle from performance_participant pp join visitor v on v.id=pp.visitor_id where pp.performance_id=? and pp.removed=0 and pp.role in ('host','performer')",p.id).map(x=>({id:x.visitor_id,handle:x.handle,role:x.visitor_id===p.host_id?'host':x.role}));
   const credits=new Map(performers.map(x=>[x.id,x]));

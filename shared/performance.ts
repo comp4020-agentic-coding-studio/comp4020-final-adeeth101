@@ -42,3 +42,40 @@ export function planAtRestart(plans:Plan[],epochMs:number|null,bpm:number,lastWr
   const cycle=cycleAt(lastWriteMs,epochMs,bpm),p=structuredClone(planAt(plans,cycle)??plans[0]??blankPlan());
   p.scene=sceneAt(p,Math.max(0,cycle));return p;
 }
+
+// What a listener is allowed to receive of a plan.
+//
+// A plan can only ever sound the clip each track is selected for: its manual
+// override, or the slot its scene assigns. A running arrangement can reach
+// every scene it lists, so all of those count; without one, only the current
+// scene does. A muted track sounds nothing, and unmuting publishes a new plan,
+// so its music is not needed either. Everything else in the catalog is
+// somebody's private workspace and must not travel to an audience.
+//
+// Dropping a clip is safe because resolvePlan treats a missing slot as
+// silence, and any change that makes a clip necessary (a scene launch, an
+// unmute, a new arrangement) publishes a new plan carrying it, at the bar that
+// change takes effect.
+export function reachableScenes(p: Plan): Slot[] {
+  const scenes = p.arrangement?.entries.length ? p.arrangement.entries.map(e => e.scene) : [p.scene];
+  return [...new Set(scenes)];
+}
+export function publishedPlan(p: Plan): Plan {
+  const scenes = reachableScenes(p);
+  const catalog: Plan['catalog'] = {}, mix: Plan['mix'] = {};
+  const sceneAssignments = {A:{},B:{},C:{},D:{}} as Plan['sceneAssignments'];
+  for (const [trackId, clips] of Object.entries(p.catalog)) {
+    if ((p.mix[trackId] ?? {mute:false}).mute) continue;
+    const slots = new Set<Slot>();
+    if (Object.hasOwn(p.manual, trackId)) { const s = p.manual[trackId]; if (s) slots.add(s); }
+    else for (const scene of scenes) { const s = p.sceneAssignments[scene]?.[trackId]; if (s) slots.add(s); }
+    const kept = [...slots].flatMap(s => clips[s] ? [[s, {revision: clips[s]!.revision, document: clips[s]!.document}] as const] : []);
+    if (!kept.length) continue;
+    catalog[trackId] = Object.fromEntries(kept);
+    mix[trackId] = p.mix[trackId] ?? {gain:0.7, mute:false};
+    for (const scene of scenes) sceneAssignments[scene][trackId] = p.sceneAssignments[scene]?.[trackId] ?? null;
+  }
+  const manual = Object.fromEntries(Object.entries(p.manual).filter(([trackId]) => Object.hasOwn(catalog, trackId)));
+  return {generation:p.generation, planRevision:p.planRevision, effectiveCycle:p.effectiveCycle,
+    catalog, mix, sceneAssignments, manual, scene:p.scene, arrangement:p.arrangement};
+}
