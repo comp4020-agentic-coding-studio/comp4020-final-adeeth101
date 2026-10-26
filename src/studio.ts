@@ -111,6 +111,36 @@ function updatePlan(id:string,t:Row,bpm:number,edit:(p:Plan)=>void=()=>{}){
 }
 // Exposed for performances, whose guest parts join and leave the same plan.
 export function replan(id:string){const t=one('select * from transport where project_id=?',id)!,s=one('select bpm from project_settings where project_id=?',id)!;return updatePlan(id,t,s.bpm);}
+// The one way the host changes. Hosting is a single role: it controls the
+// shared transport and, while a performance is live, that performance. Moving
+// it in two places let the room and the stage disagree about who was in
+// charge, so every path -- pass, release, claim, takeover, removal, timeout --
+// goes through here, inside the caller’s transaction.
+// Filled in by src/performances.ts at load: ending a performance belongs
+// there, and studio.ts must not import it back.
+let endLive:(after:(f:()=>void)=>void,performance:Row,reason:string,by:Visitor|null)=>void=()=>{};
+export const onHostlessPerformance=(fn:typeof endLive)=>{endLive=fn;};
+export function setHost(projectId:string,visitorId:string|null,now=Date.now()){
+  run(`update transport set conductor_id=?,lease_until=?,revision=revision+1 where project_id=?`,visitorId,visitorId?now+ROOM_LIMITS.hostLeaseMs:0,projectId);
+  const perf=livePerformance(projectId);
+  if(!perf)return null;
+  const previous=perf.host_id as string;
+  if(visitorId){
+    // A live performance follows the room. Its host row is what src/access.ts
+    // reads for host-only powers, and its participant rows are its credits.
+    run(`update performance set host_id=? where id=?`,visitorId,perf.id);
+    run("insert into performance_participant(performance_id,visitor_id,role,admitted_at) values(?,?,'host',?) on conflict(performance_id,visitor_id) do update set role='host',removed=0",perf.id,visitorId,now);
+    // Whoever held it before keeps no host-only power. The performance itself
+    // continues at the same phase: nothing restarts.
+    if(previous!==visitorId)run("update performance_participant set role='performer' where performance_id=? and visitor_id=? and role='host'",perf.id,previous);
+    return null;
+  }
+  // Nobody is hosting. A live performance cannot continue unattended, and
+  // leaving host_id naming the departed host would keep handing them
+  // host-only powers, so the caller is told to end it.
+  return perf;
+}
+
 function startTransport(id:string,t:Row,now:number){
   const p=structuredClone(plansFor(id,t.generation).at(-1)??blankPlan());p.generation=t.generation+1;p.planRevision=0;p.effectiveCycle=0;p.arrangement=null;syncCatalog(id,p);
   run("update transport set status='playing',epoch_ms=?,generation=generation+1,revision=revision+1 where project_id=?",now+1200,id);savePlan(id,p);
@@ -119,7 +149,7 @@ function startTransport(id:string,t:Row,now:number){
 function stopTransport(id:string,t:Row,bpm:number,now:number,releaseHost=false){
   const cycle=t.epoch_ms?cycleAt(now,t.epoch_ms,bpm):0;
   const latest=structuredClone(planAt(plansFor(id,t.generation),cycle)??plansFor(id,t.generation).at(-1)??blankPlan());latest.scene=sceneAt(latest,cycle);syncCatalog(id,latest);latest.generation=t.generation+1;latest.planRevision=0;latest.effectiveCycle=0;latest.arrangement=null;
-  run(`update transport set status='stopped',epoch_ms=null,generation=generation+1,revision=revision+1${releaseHost?',conductor_id=null,lease_until=0':''} where project_id=?`,id);savePlan(id,latest);
+  run("update transport set status='stopped',epoch_ms=null,generation=generation+1,revision=revision+1 where project_id=?",id);if(releaseHost)setHost(id,null,now); // the sweep in performances.ts ends any live sessionsavePlan(id,latest);
   run('delete from performance_plan where project_id=? and generation<?',id,t.generation+1);
 }
 
@@ -247,7 +277,7 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
       newPart(s.name,s.role,s.presetId,s.presetVersion,s.source,s.provenance);plan();
       // "Add and play": the host's first addition may start the shared mix.
       if(payload.play===true&&t.status==='stopped'&&(isHost||!hostId)){
-        run('update transport set conductor_id=?,lease_until=? where project_id=?',v.id,now+ROOM_LIMITS.hostLeaseMs,id);
+        setHost(id,v.id,now);
         startTransport(id,one('select * from transport where project_id=?',id)!,now);effectiveCycle=0;
       }
       break;
@@ -319,15 +349,15 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
       need(m!.role!=='owner','The owner stays with the mix. Make it private instead of leaving.',409);
       run('update project_member set removed_at=? where project_id=? and visitor_id=?',now,id,target);
       for(const [k,l] of leases)if(l.projectId===id&&l.visitorId===target)leases.delete(k);
-      if(hostId===target)run('update transport set conductor_id=null,lease_until=0,revision=revision+1 where project_id=?',id);
+      if(hostId===target){const orphaned=setHost(id,null,now);if(orphaned)endLive(after,orphaned,'host-left',v);}
       entityId=target;after(revalidate);break;
     }
-    case 'host.claim':{need(!hostId||isHost,`${hostId?handleOf(hostId):'Someone'} is hosting.`,409);run('update transport set conductor_id=?,lease_until=?,revision=revision+1 where project_id=?',v.id,now+ROOM_LIMITS.hostLeaseMs,id);entityRevision=t.revision+1;break;}
-    case 'host.pass':{host();need(memberRole(id,payload.visitorId),'Hosting passes to a member of this mix.',404);run('update transport set conductor_id=?,lease_until=?,revision=revision+1 where project_id=?',payload.visitorId,now+ROOM_LIMITS.hostLeaseMs,id);entityId=payload.visitorId;audience=true;break;}
-    case 'host.release':{host();run('update transport set conductor_id=null,lease_until=0,revision=revision+1 where project_id=?',id);break;}
+    case 'host.claim':{need(!hostId||isHost,`${hostId?handleOf(hostId):'Someone'} is hosting.`,409);setHost(id,v.id,now);entityRevision=t.revision+1;break;}
+    case 'host.pass':{host();need(memberRole(id,payload.visitorId),'Hosting passes to a member of this mix.',404);setHost(id,payload.visitorId,now);entityId=payload.visitorId;audience=true;break;}
+    case 'host.release':{host();const orphaned=setHost(id,null,now);if(orphaned)endLive(after,orphaned,'host-left',v);break;}
     case 'transport.start':{
       need(t.status==='stopped','The mix is already playing.',409);
-      if(!isHost){need(!hostId,`${hostId?handleOf(hostId):''} is hosting. Only the host starts the shared mix.`,403);run('update transport set conductor_id=?,lease_until=? where project_id=?',v.id,now+ROOM_LIMITS.hostLeaseMs,id);}
+      if(!isHost){need(!hostId,`${hostId?handleOf(hostId):''} is hosting. Only the host starts the shared mix.`,403);setHost(id,v.id,now);}
       startTransport(id,one('select * from transport where project_id=?',id)!,now);entityRevision=t.revision+1;audience=true;break;
     }
     case 'transport.stop':{need(t.status==='playing','The mix is already stopped.',409);need(isHost||owner,'Only the host stops the shared mix.',403);stopTransport(id,t,settings.bpm,now);entityRevision=t.revision+1;audience=true;break;}

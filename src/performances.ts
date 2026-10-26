@@ -8,7 +8,7 @@ import {logAction} from './events.ts';
 import {CommandError,need,hidden,text,code,one,rows,run,tx,limit,receiptFor,saveReceipt} from './errors.ts';
 import {memberOf,performanceAccess,readPerformance,memberRole} from './access.ts';
 import {addEvent,broadcast,openStream,revalidate,scopeListeners} from './hub.ts';
-import {announce,replan,chatRow,chatBody,editCapacity,heartbeat,ROOM_LIMITS} from './studio.ts';
+import {announce,setHost,onHostlessPerformance,replan,chatRow,chatBody,editCapacity,heartbeat,ROOM_LIMITS} from './studio.ts';
 import {parseSource} from '../shared/expr.ts';
 import {presetById,roleOf} from '../shared/presets.ts';
 import {SLOTS,publishedPlan,type Plan} from '../shared/performance.ts';
@@ -40,6 +40,9 @@ export function startPerformance(v:Visitor,projectId:string,input:Row){
     const result={ok:true,id};saveReceipt(v,cid,hash,result);return result;
   });
 }
+// Releasing or losing the host leaves a live performance with nobody
+// accountable; studio.ts reports it here and it ends, as a restart would.
+onHostlessPerformance((after,performance,reason,by)=>endIn(after,performance,reason,by));
 export function endPerformance(v:Visitor,performanceId:string,reason='ended'){
   const r=tx(after=>{
     const a=readPerformance(v,performanceId),p=a.performance;
@@ -183,8 +186,9 @@ export function moderate(v:Visitor,performanceId:string,input:Row){
       case 'delete':{run('update performance_chat set deleted_at=? where id=? and performance_id=?',now,input.messageId,p.id);break;}
       case 'pass':{
         need(memberRole(p.project_id,target),'Hosting passes to a member of the project.',404);
-        run('update performance set host_id=? where id=?',target,p.id);run('update transport set conductor_id=?,lease_until=?,revision=revision+1 where project_id=?',target,now+ROOM_LIMITS.hostLeaseMs,p.project_id);
-        run("insert into performance_participant(performance_id,visitor_id,role,admitted_at) values(?,?,'host',?) on conflict(performance_id,visitor_id) do update set role='host'",p.id,target,now);
+        // One operation for both entry points, so the room and the stage
+        // can never disagree about who is hosting.
+        setHost(p.project_id,target,now);
         announce(after,v,p.project_id,'host.passed',target,null);break;
       }
       default:throw new CommandError('Unknown action.');
