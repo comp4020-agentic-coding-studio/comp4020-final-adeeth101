@@ -4,6 +4,7 @@
 // id and inheriting their traces.
 import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { db, now, setting } from "./db.ts";
+import { ensureFriendCode } from "./schema.ts";
 
 const COOKIE = "visitor";
 
@@ -15,6 +16,17 @@ const secret = process.env.VISITOR_SECRET ?? setting("visitor_secret", () => ran
 
 const sign = (id: string): string =>
   createHmac("sha256", secret).update(id).digest("base64url");
+
+// Bearer links (an unlisted project's view link, a performance's listen link)
+// are derived from the secret, the resource and its link version, so the owner
+// can copy the link again without the raw token being stored anywhere, and
+// bumping the version revokes every earlier link.
+export const derive = (purpose: string): string =>
+  createHmac("sha256", secret).update(`link:${purpose}`).digest("base64url").slice(0, 32);
+export function sameToken(given: unknown, expected: string): boolean {
+  if (typeof given !== "string" || given.length !== expected.length) return false;
+  return timingSafeEqual(Buffer.from(given), Buffer.from(expected));
+}
 
 function verify(value: string): string | null {
   const cut = value.lastIndexOf(".");
@@ -110,6 +122,7 @@ export function identify(cookieHeader: string | undefined): Visitor {
 // write: a visitor who already has a row is left alone.
 export function persist(visitor: Visitor): void {
   insertVisitor.run(visitor.id, visitor.handle, now(), now());
+  ensureFriendCode(visitor.id);
 }
 
 export function rename(visitor: Visitor, handle: string): void {

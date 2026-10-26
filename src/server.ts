@@ -11,8 +11,13 @@ import { cleanHandle, cookieHeader, identify, persist, rename, type Visitor } fr
 import { act, state } from "./feature.ts";
 import { record, stream } from "./events.ts";
 import { page, readmePage } from "./page.ts";
-import {createProject,command,snapshot,projectStream,updatePresence,exportProject,importProject,CommandError} from './studio.ts';
-import {studioPage,archiveHtml} from './studio-page.ts';
+import {createProject,command,snapshot,projectStream,roomHeartbeat,exportProject,importProject,projectChat,sendProjectChat,deleteProjectChat,mySounds,saveSound,deleteSound,myProjects,publicProjects,heartbeat,CommandError} from './studio.ts';
+import {friendsView,friendAction,notifications,clearNotification,accountStream,createInvitation,listInvitations,revokeInvitation,previewInvitation,acceptInvitation,redeemViewLink,redeemListenLink,makeRecovery,recover,me} from './social.ts';
+import {startPerformance,endPerformance,audienceSnapshot,audienceStream,livePerformances,performanceChat,sendPerformanceChat,react,moderate,rotateListenLink,guestCommand} from './performances.ts';
+import {closeAll} from './hub.ts';
+import {projectAccess,performanceAccess} from './access.ts';
+import {appPage,archiveHtml} from './studio-page.ts';
+import {PACKS} from '../shared/presets.ts';
 
 const PORT = Number(process.env.PORT ?? 8080);
 // fileURLToPath, not .pathname: a path with a space in it arrives
@@ -41,6 +46,8 @@ const send = (
 
 const json = (res: ServerResponse, status: number, body: unknown, extra = {}): void =>
   send(res, status, "application/json; charset=utf-8", JSON.stringify(body), extra);
+// Anything that depends on who is asking must never sit in a shared cache.
+const PRIVATE = { "cache-control": "private, no-store" };
 
 const html = (res: ServerResponse, status: number, body: string, extra = {}): void =>
   send(res, status, "text/html; charset=utf-8", body, extra);
@@ -140,35 +147,103 @@ const server = createServer(async (req, res) => {
     }
 
     const visitor = identify(req.headers.cookie);
+    const cursorOf = () => { const c = Number(req.headers['last-event-id'] ?? url.searchParams.get('since') ?? 0); return Number.isFinite(c) ? c : 0; };
+    const ok = (body: unknown, status = 200) => json(res, status, body, { ...PRIVATE, ...cookie(visitor) });
 
-    if (path === '/api/time') return json(res,200,{serverNowMs:Date.now()});
+    if (path === '/api/time') return json(res,200,{serverNowMs:Date.now()},PRIVATE);
+    // Every Ensemble mutation is JSON. A plain form may still create a mix, so
+    // the no-script landing page keeps working.
+    if(method==='POST'&&path.startsWith('/api/')&&!['/api/act','/api/handle','/api/projects'].includes(path)&&!(req.headers['content-type']??'').includes('application/json'))return json(res,415,{error:'Send JSON.'});
     if(path === '/api/projects' && method === 'POST'){
       const result=createProject(visitor,(await readJson(req)).title);
-      if(wantsHtml(req)){res.writeHead(303,{location:`/p/${result.id}/compose`,...cookie(visitor)});return res.end();}
-      return json(res,201,result,cookie(visitor));
+      if(wantsHtml(req)){res.writeHead(303,{location:`/p/${result.id}?new=1`,...cookie(visitor)});return res.end();}
+      return ok(result,201);
     }
-    if(path === '/api/import' && method === 'POST')return json(res,201,importProject(visitor,await readJson(req,512*1024)),cookie(visitor));
-    // Studio mutations are JSON only; a form or text post is refused before parsing.
-    if(method==='POST'&&(path==='/api/import'||/^\/api\/projects\/[^/]+\/(commands|presence)$/.test(path))&&!(req.headers['content-type']??'').includes('application/json'))return json(res,415,{error:'Send JSON.'});
-    const apiProject=path.match(/^\/api\/projects\/([0-9a-f-]+)(?:\/(commands|events|presence|export))?$/);
+    if(path === '/api/projects' && method === 'GET')return ok({projects:myProjects(visitor)});
+    if(path === '/api/discover' && method === 'GET')return ok({projects:publicProjects(Number(url.searchParams.get('page')??0))});
+    if(path === '/api/live' && method === 'GET')return ok({performances:livePerformances(Number(url.searchParams.get('page')??0))});
+    if(path === '/api/presets' && method === 'GET')return json(res,200,{packs:PACKS},{'cache-control':'no-cache'});
+    if(path === '/api/import' && method === 'POST')return ok(importProject(visitor,await readJson(req,512*1024)),201);
+    if(path === '/api/sounds'){if(method==='GET')return ok({sounds:mySounds(visitor)});if(method==='POST')return ok(saveSound(visitor,await readJson(req)),201);}
+    const sound=path.match(/^\/api\/sounds\/([0-9a-f-]+)\/delete$/);if(sound&&method==='POST')return ok(deleteSound(visitor,sound[1]));
+    if(path === '/api/friends'){if(method==='GET')return ok(friendsView(visitor));if(method==='POST')return ok(friendAction(visitor,await readJson(req)));}
+    if(path === '/api/notifications' && method==='GET')return ok({notifications:notifications(visitor)});
+    const note=path.match(/^\/api\/notifications\/(\d+)\/clear$/);if(note&&method==='POST')return ok(clearNotification(visitor,Number(note[1])));
+    if(path === '/api/account/events' && method==='GET'){res.setHeader('set-cookie',cookieHeader(visitor,secure));accountStream(visitor,res,cursorOf());return;}
+    if(path === '/api/heartbeat' && method==='POST'){heartbeat(visitor);return ok({ok:true});}
+    if(path === '/api/recovery' && method==='POST')return ok(makeRecovery(visitor));
+    if(path === '/api/recover' && method==='POST'){
+      const found=recover(visitor,(await readJson(req)).code,String(req.headers['fly-client-ip']??req.socket.remoteAddress??''));
+      // A new signed session for the recovered identity on this device.
+      return json(res,200,{id:found.id,handle:found.handle},{...PRIVATE,'set-cookie':cookieHeader({...found,fresh:true},secure)});
+    }
+    if(path === '/api/invitations' && method==='POST')return ok(createInvitation(visitor,await readJson(req)),201);
+    const invite=path.match(/^\/api\/invitations\/([0-9a-f-]+)\/(preview|accept|decline|revoke)$/);
+    if(invite&&method==='POST'){
+      const [,iid,act2]=invite,body=await readJson(req);
+      if(act2==='preview')return ok(previewInvitation(visitor,iid,body.token));
+      if(act2==='revoke')return ok(revokeInvitation(visitor,iid));
+      return ok(acceptInvitation(visitor,iid,body.token,act2==='decline'));
+    }
+    const apiProject=path.match(/^\/api\/projects\/([0-9a-f-]+)(?:\/(commands|events|presence|export|chat|invitations|view-link|go-live))?$/);
     if(apiProject){
       const [,id,action]=apiProject;
-      if(!action && method==='GET')return json(res,200,snapshot(id,visitor),cookie(visitor));
-      if(action==='commands'&&method==='POST')return json(res,200,command(visitor,id,await readJson(req)),cookie(visitor));
-      if(action==='events'&&method==='GET'){const cursor=Number(req.headers['last-event-id']??url.searchParams.get('since')??0);res.setHeader('set-cookie',cookieHeader(visitor,secure));projectStream(id,visitor,res,Number.isFinite(cursor)?cursor:0);return;}
-      if(action==='presence'&&method==='POST'){updatePresence(id,visitor,(await readJson(req)).route);return json(res,200,{ok:true},cookie(visitor));}
-      if(action==='export'&&method==='GET')return json(res,200,exportProject(id,visitor),{'content-disposition':'attachment; filename="stream-piece.json"',...cookie(visitor)});
-      return json(res,405,{error:'Method not allowed.'},{allow:action==='commands'||action==='presence'?'POST':'GET'});
+      if(!action && method==='GET')return ok(snapshot(visitor,id));
+      if(action==='commands'&&method==='POST')return ok(command(visitor,id,await readJson(req)));
+      if(action==='events'&&method==='GET'){res.setHeader('set-cookie',cookieHeader(visitor,secure));projectStream(id,visitor,res,cursorOf());return;}
+      if(action==='presence'&&method==='POST'){roomHeartbeat(visitor,id);return ok({ok:true});}
+      if(action==='export'&&method==='GET')return json(res,200,exportProject(visitor,id),{...PRIVATE,'content-disposition':'attachment; filename="ensemble-mix.json"',...cookie(visitor)});
+      if(action==='chat'&&method==='GET')return ok(projectChat(visitor,id,url.searchParams.get('before')));
+      if(action==='chat'&&method==='POST'){const body=await readJson(req);return ok(body.delete!==undefined?deleteProjectChat(visitor,id,body.delete):sendProjectChat(visitor,id,body));}
+      if(action==='invitations'&&method==='GET')return ok({invitations:listInvitations(visitor,'project',id)});
+      if(action==='view-link'&&method==='POST')return ok(redeemViewLink(visitor,id,(await readJson(req)).token));
+      if(action==='go-live'&&method==='POST')return ok(startPerformance(visitor,id,await readJson(req)),201);
+      return json(res,405,{error:'Method not allowed.'},{allow:['commands','presence','view-link','go-live'].includes(action)?'POST':'GET'});
     }
-    const studio=path.match(/^\/p\/([0-9a-f-]+)\/(compose|perform)$/);
-    if(studio){snapshot(studio[1],visitor);return html(res,200,await studioPage(studio[1],studio[2]),cookie(visitor));}
-    if(path === '/')return html(res,200,await studioPage(),cookie(visitor));
+    const apiPerf=path.match(/^\/api\/performances\/([0-9a-f-]+)(?:\/(events|chat|react|moderate|end|listen-link|rotate-link|commands|invitations))?$/);
+    if(apiPerf){
+      const [,pid,action]=apiPerf;
+      if(!action&&method==='GET')return ok(audienceSnapshot(visitor,pid));
+      if(action==='events'&&method==='GET'){res.setHeader('set-cookie',cookieHeader(visitor,secure));audienceStream(visitor,pid,res,cursorOf());return;}
+      if(action==='chat'&&method==='GET')return ok(performanceChat(visitor,pid));
+      if(action==='invitations'&&method==='GET')return ok({invitations:listInvitations(visitor,'perform',pid)});
+      if(method==='POST'){
+        const body=await readJson(req);
+        if(action==='chat')return ok(sendPerformanceChat(visitor,pid,body));
+        if(action==='react')return ok(react(visitor,pid,body.reaction));
+        if(action==='moderate')return ok(moderate(visitor,pid,body));
+        if(action==='end')return ok(endPerformance(visitor,pid));
+        if(action==='listen-link')return ok(redeemListenLink(visitor,pid,body.token));
+        if(action==='rotate-link')return ok(rotateListenLink(visitor,pid));
+        if(action==='commands')return ok(guestCommand(visitor,pid,body));
+      }
+      return json(res,405,{error:'Method not allowed.'});
+    }
+    // Pages. A project room is rendered only for someone who may read it; a
+    // private project answers exactly like a missing one.
+    const room=path.match(/^\/p\/([0-9a-f-]+)(?:\/(compose|perform))?$/);
+    if(room){
+      if(room[2]){res.writeHead(301,{location:`/p/${room[1]}`});return res.end();}
+      const a=projectAccess(visitor,room[1]);
+      // A view link carries its token in the fragment, which the server never
+      // sees: the page loads generically and exchanges the token by POST.
+      if(!a)return html(res,404,await appPage({view:'room',projectId:room[1],missing:true}),{...PRIVATE,...cookie(visitor)});
+      return html(res,200,await appPage({view:'room',projectId:room[1],title:a.project.title}),{...PRIVATE,...cookie(visitor)});
+    }
+    const livePage=path.match(/^\/live\/([0-9a-f-]+)$/);
+    if(livePage){const a=performanceAccess(visitor,livePage[1]);return html(res,200,await appPage({view:'audience',performanceId:livePage[1],title:a?.performance.title}),{...PRIVATE,...cookie(visitor)});}
+    if(path==='/live')return html(res,200,await appPage({view:'live'}),{...PRIVATE,...cookie(visitor)});
+    if(path==='/friends')return html(res,200,await appPage({view:'friends'}),{...PRIVATE,...cookie(visitor)});
+    if(path==='/discover')return html(res,200,await appPage({view:'discover'}),{...PRIVATE,...cookie(visitor)});
+    const invitePage=path.match(/^\/invite\/([0-9a-f-]+)$/);
+    if(invitePage)return html(res,200,await appPage({view:'invite',invitationId:invitePage[1]}),{...PRIVATE,'referrer-policy':'no-referrer',...cookie(visitor)});
+    if(path === '/')return html(res,200,await appPage({view:'play'}),{...PRIVATE,...cookie(visitor)});
     if(path === '/archive')return html(res,200,readmePage(`<h1>Earlier source sketches</h1>${archiveHtml()}`),cookie(visitor));
     if (path === "/legacy") {
       return html(res, 200, page(state(visitor)), cookie(visitor));
     }
 
-    if (path === "/api/me") return json(res, 200, visitor, cookie(visitor));
+    if (path === "/api/me") return json(res, 200, me(visitor), { ...PRIVATE, ...cookie(visitor) });
 
     if (path === "/api/state") {
       return json(res, 200, state(visitor), cookie(visitor));
@@ -244,5 +319,5 @@ server.listen(PORT, "0.0.0.0", () => {
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   // Live streams never end on their own, so they are closed explicitly;
   // otherwise close() would wait for them until Fly gives up and kills us.
-  process.on(signal, () => { server.close(() => process.exit(0)); server.closeAllConnections(); });
+  process.on(signal, () => { closeAll(); server.close(() => process.exit(0)); server.closeAllConnections(); });
 }

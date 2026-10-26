@@ -1,113 +1,103 @@
-import {randomUUID,createHash} from 'node:crypto';
-import type {ServerResponse} from 'node:http';
+// Project rooms: the shared mix, its parts, membership, the host's transport,
+// performance plans, chat, import/export and restart handling. Every function
+// that reads or changes a project checks access first (src/access.ts); a
+// change and its scoped events commit in one transaction and are announced
+// only after commit.
+import {randomUUID} from 'node:crypto';
+import './schema.ts';
 import {db} from './db.ts';
-import {persist,type Visitor} from './identity.ts';
+import {persist,derive,type Visitor} from './identity.ts';
 import {logAction} from './events.ts';
+import {CommandError,need,hidden,text,code,one,rows,run,tx,receiptFor,saveReceipt,limit} from './errors.ts';
+import {projectAccess,memberRole,readProject,type ProjectAccess} from './access.ts';
+import {addEvent,broadcast,openStream,revalidate,type Scope} from './hub.ts';
 import {emptyClip,validateDocument} from '../shared/music.ts';
 import {parseCode} from '../shared/code.ts';
+import {validateAny,sourceOf,type AnyDocument} from '../shared/clip.ts';
+import {parseSource} from '../shared/expr.ts';
+import {presetById,roleOf,ROLES} from '../shared/presets.ts';
 import {blankPlan,nextBoundary,sceneAt,cycleAt,planAt,planAtRestart,SLOTS,type Slot,type Plan} from '../shared/performance.ts';
-import type {Snapshot,Track,Arrangement} from '../shared/studio.ts';
+import type {RoomSnapshot,ViewSnapshot,Part,Arrangement,Member} from '../shared/studio.ts';
 
-// New migrations are append-only. Legacy trace tables remain intact.
-db.exec(`create table if not exists studio_migration (version integer primary key, applied_at integer not null)`);
-if(!db.prepare('select version from studio_migration where version=1').get()){
-  // SQLite creates a consistent backup even if the legacy DB has a WAL.
-  const path=db.prepare('pragma database_list').get() as {file:string};
-  if(path.file && (db.prepare('select count(*) as n from trace').get() as {n:number}).n>0){
-    const backup=`${path.file}.before-studio-${Date.now()}.db`;
-    db.exec(`vacuum into '${backup.replaceAll("'","''")}'`);
-  }
-  db.exec(`begin immediate;
-  create table project (id text primary key,title text not null,created_by text not null references visitor(id),created_at integer not null,updated_at integer not null,revision integer not null);
-  create table track (id text primary key,project_id text not null references project(id),owner_id text not null references visitor(id),name text not null,position integer not null,revision integer not null,archived_at integer);
-  create index track_project on track(project_id,position);
-  create table clip (id text primary key,track_id text not null references track(id),slot text not null,current_revision integer not null,unique(track_id,slot));
-  create table clip_revision (clip_id text not null references clip(id),revision integer not null,schema_version integer not null,document_json text not null,source_text text,provenance_json text not null,created_by text not null,created_at integer not null,primary key(clip_id,revision));
-  create table scene_assignment (project_id text not null references project(id),scene text not null,track_id text not null references track(id),clip_slot text,primary key(project_id,scene,track_id));
-  create table project_settings (project_id text primary key references project(id),bpm integer not null,scene_names_json text not null,arrangement_json text not null,settings_revision integer not null);
-  create table transport (project_id text primary key references project(id),generation integer not null,status text not null,epoch_ms integer,conductor_id text,lease_until integer not null,revision integer not null);
-  create table performance_plan (project_id text not null references project(id),generation integer not null,plan_revision integer not null,effective_cycle integer not null,plan_json text not null,created_at integer not null,primary key(project_id,generation,plan_revision));
-  create table command_receipt (visitor_id text not null,command_id text not null,request_hash text not null,response_json text not null,created_at integer not null,primary key(visitor_id,command_id));
-  create table legacy_import (trace_id integer primary key,new_clip_id text,archived_source text not null,reason text);
-  alter table event add column project_id text;
-  alter table event add column command_id text;
-  create index event_project on event(project_id,id);
-  insert into studio_migration values(1,strftime('%s','now')*1000);
-  commit;`);
-}
+export {CommandError};
 type Row=Record<string,any>;
-const one=(sql:string,...args:any[]):Row|undefined=>db.prepare(sql).get(...args) as Row|undefined;
-const rows=(sql:string,...args:any[]):Row[]=>db.prepare(sql).all(...args) as Row[];
-const run=(sql:string,...args:any[])=>db.prepare(sql).run(...args);
-const listeners=new Map<string,Set<{visitorId:string;res:ServerResponse}>>();
-const presence=new Map<string,Map<string,{handle:string;route:string;until:number}>>();
-const buckets=new Map<string,{tokens:number;at:number}>();
-export class CommandError extends Error {
-  status:number;current?:unknown;
-  constructor(message:string,status=422,current?:unknown){super(message);this.status=status;this.current=current;}
-}
-function need(test:unknown,message:string,status=422):asserts test {if(!test)throw new CommandError(message,status);}
-const text=(x:unknown,max:number)=>{need(typeof x==='string'&&x.trim().length>0&&x.length<=max,`Use 1–${max} characters.`);return (x as string).trim();};
+export const ROOM_LIMITS={parts:12,editors:8,leaseMs:30000,hostLeaseMs:30000,editingWindowMs:60000,chatLength:500,chatPage:50,revisionsKept:200};
+const VISIBILITIES=['private','unlisted','public'];
+
+// Ephemeral state: lost on restart by design, which is how a restart releases
+// part leases and room presence.
+const leases=new Map<string,{visitorId:string;handle:string;until:number;projectId:string}>();
+const editing=new Map<string,Map<string,number>>();
+const roomPresence=new Map<string,Map<string,{handle:string;until:number}>>();
+const sweepRoom=(m:Map<string,{handle:string;until:number}>)=>{const now=Date.now();for(const [k,x] of m)if(x.until<now)m.delete(k);return m;};
+const online=new Map<string,number>();
+
 const slot=(x:unknown):Slot=>{need(SLOTS.includes(x as Slot),'Choose clip or scene A–D.');return x as Slot;};
-// Track name and owner turn an id into something a person can narrate from the logs.
-const trackLabel=(trackId:unknown)=>{const t=typeof trackId==='string'?one('select t.name,v.handle as owner from track t join visitor v on v.id=t.owner_id where t.id=?',trackId):undefined;return t?{track:t.name,owner:t.owner}:{};};
-function emit(v:Visitor,projectId:string,eventId:number,kind:string,entityId:string|null,commandId:string|null){
-  logAction(v,kind,{project:projectId.slice(0,8),event:eventId,...(entityId?{entity:entityId.slice(0,8)}:{}),...trackLabel(entityId)});
-  const revision=one('select revision from project where id=?',projectId)?.revision??0;
-  const data=JSON.stringify({projectId,projectRevision:revision,kind,entityId,commandId});
-  for(const {res} of listeners.get(projectId)??[]){if(res.writableLength>128*1024){res.end();continue;}res.write(`id: ${eventId}\nevent: change\ndata: ${data}\n\n`);}
+const handleOf=(id:string)=>one('select handle from visitor where id=?',id)?.handle??'someone';
+const partLabel=(trackId:unknown)=>{const t=typeof trackId==='string'?one('select t.name,v.handle as owner from track t join visitor v on v.id=t.owner_id where t.id=?',trackId):undefined;return t?{track:t.name,owner:t.owner}:{};};
+const livePerformance=(projectId:string)=>one("select * from performance where project_id=? and status='live'",projectId);
+
+// Writes the member event (and, where the change is visible to them, the
+// public-view and audience events) inside the caller's transaction, and queues
+// the broadcasts and the log line for after commit.
+export function announce(after:(f:()=>void)=>void,v:Visitor|null,projectId:string,kind:string,entityId:string|null,commandId:string|null,opts:{view?:boolean;audience?:boolean;log?:Record<string,unknown>|false}={}){
+  const p=one('select visibility,revision from project where id=?',projectId)!;
+  const payload={projectRevision:p.revision,entityId};
+  const memberEvent=addEvent(`member:${projectId}`,v?.id??null,kind,payload,projectId,commandId);
+  const extra:[Scope,number][]=[];
+  if(opts.view&&p.visibility!=='private')extra.push([`view:${projectId}`,addEvent(`view:${projectId}`,null,kind,{},projectId,null)]);
+  const perf=opts.audience?livePerformance(projectId):undefined;
+  if(perf)extra.push([`audience:${perf.id}`,addEvent(`audience:${perf.id}`,null,kind,{},projectId,null)]);
+  after(()=>{
+    broadcast(`member:${projectId}`,memberEvent,kind,payload);
+    for(const [scope,id] of extra)broadcast(scope,id,kind);
+    if(opts.log!==false)logAction(v,kind,{project:projectId.slice(0,8),event:memberEvent,...(entityId&&entityId!==projectId?{entity:entityId.slice(0,8)}:{}),...partLabel(entityId),...(opts.log??{})});
+  });
+  return memberEvent;
 }
-function event(projectId:string,visitorId:string|null,kind:string,entityId:string|null,commandId:string|null){
-  return Number(run('insert into event(visitor_id,kind,payload,created_at,project_id,command_id) values(?,?,?,?,?,?)',visitorId,kind,JSON.stringify({entityId}),Date.now(),projectId,commandId).lastInsertRowid);
-}
-function newProject(v:Visitor,title:string){
+
+// --- creating and listing projects -----------------------------------------
+const ADJ=['Velvet','Neon','Paper','Copper','Midnight','Lucky','Sunny','Tidal','Pocket','Cosmic','Quiet','Bright'];
+const NOUN=['Parade','Orbit','Garden','Signal','Circuit','Lantern','Harbour','Comet','Echo','Meadow','Engine','Window'];
+const generatedTitle=()=>`${ADJ[Math.floor(Math.random()*ADJ.length)]} ${NOUN[Math.floor(Math.random()*NOUN.length)]}`;
+function savePlan(id:string,p:Plan){run('insert into performance_plan values(?,?,?,?,?,?)',id,p.generation,p.planRevision,p.effectiveCycle,JSON.stringify(p),Date.now());}
+function newProject(v:Visitor,title:string,visibility='private',hostNow=true){
   persist(v);const id=randomUUID(),now=Date.now();
-  run('insert into project values(?,?,?,?,?,1)',id,title,v.id,now,now);
-  run('insert into project_settings values(?,120,?,?,1)',id,JSON.stringify({A:'A · Intro',B:'B · Build',C:'C · Lift',D:'D · Outro'}),JSON.stringify({entries:[{scene:'A',bars:4},{scene:'B',bars:4},{scene:'C',bars:4},{scene:'D',bars:4}],loop:true}));
-  run("insert into transport values(?,0,'stopped',null,null,0,1)",id);
+  run('insert into project(id,title,created_by,created_at,updated_at,revision,visibility) values(?,?,?,?,?,1,?)',id,title,v.id,now,now,visibility);
+  run('insert into project_member values(?,?,?,?,null)',id,v.id,'owner',now);
+  run('insert into project_settings values(?,100,?,?,1)',id,JSON.stringify({A:'A · Intro',B:'B · Build',C:'C · Lift',D:'D · Outro'}),JSON.stringify({entries:[{scene:'A',bars:4},{scene:'B',bars:4},{scene:'C',bars:4},{scene:'D',bars:4}],loop:true}));
+  // The creator starts as host so a first mix never needs a podium claimed.
+  run("insert into transport values(?,0,'stopped',null,?,?,1)",id,hostNow?v.id:null,hostNow?now+ROOM_LIMITS.hostLeaseMs:0);
   savePlan(id,blankPlan());return id;
 }
-function savePlan(id:string,p:Plan){run('insert into performance_plan values(?,?,?,?,?,?)',id,p.generation,p.planRevision,p.effectiveCycle,JSON.stringify(p),Date.now());}
-function newClip(v:Visitor,trackId:string,s:Slot,document:unknown,source:string|null=null,provenance:Row={}){
-  const id=randomUUID(),doc=validateDocument(document);
-  run('insert into clip values(?,?,?,1)',id,trackId,s);
-  run('insert into clip_revision values(?,1,1,?,?,?,?,?)',id,JSON.stringify(doc),source,JSON.stringify(provenance),v.id,Date.now());
-  return id;
-}
-function newTrack(v:Visitor,id:string,name:string,kind:'drums'|'melody',archived=false){
-  const trackId=randomUUID(),position=Number(one('select coalesce(max(position),-1)+1 as p from track where project_id=?',id)!.p);
-  run('insert into track values(?,?,?,?,?,1,?)',trackId,id,v.id,name,position,archived?Date.now():null);
-  newClip(v,trackId,'A',emptyClip(kind));
-  for(const s of SLOTS)run('insert into scene_assignment values(?,?,?,?)',id,s,trackId,'A');
-  return trackId;
-}
 export function createProject(v:Visitor,rawTitle:unknown){
-  const title=text(rawTitle??'Untitled piece',60);db.exec('begin immediate');
-  try{const id=newProject(v,title),eid=event(id,v.id,'project.created',id,null);db.exec('commit');emit(v,id,eid,'project.created',id,null);return {id};}catch(e){db.exec('rollback');throw e;}
+  limit(`create:${v.id}`,10,0.2,'You are starting mixes very quickly. Try again shortly.');
+  const title=rawTitle==null||rawTitle===''?generatedTitle():text(rawTitle,60,'the mix a name');
+  return tx(after=>{const id=newProject(v,title);announce(after,v,id,'project.created',id,null);return {id};});
 }
+export function myProjects(v:Visitor){
+  return rows(`select p.id,p.title,p.visibility,p.updated_at as updatedAt,m.role,(select count(*) from track t where t.project_id=p.id and t.archived_at is null and t.guest_performance_id is null) as parts,
+    (select count(*) from project_member x where x.project_id=p.id and x.removed_at is null) as members
+    from project_member m join project p on p.id=m.project_id where m.visitor_id=? and m.removed_at is null order by p.updated_at desc limit 50`,v.id);
+}
+export function publicProjects(page:number){
+  const offset=Math.max(0,Math.floor(page))*24;
+  return rows(`select p.id,p.title,p.updated_at as updatedAt,(select count(*) from track t where t.project_id=p.id and t.archived_at is null and t.guest_performance_id is null) as parts
+    from project p where p.visibility='public' order by p.updated_at desc limit 25 offset ?`,offset);
+}
+
+// --- plans ----------------------------------------------------------------
 function plansFor(id:string,generation:number):Plan[]{return rows('select plan_json from performance_plan where project_id=? and generation=? order by effective_cycle,plan_revision',id,generation).map(x=>JSON.parse(x.plan_json));}
-export function snapshot(id:string,v:Visitor):Snapshot {
-  db.exec('begin');
-  try{
-    const p=one('select * from project where id=?',id);need(p,'Piece not found.',404);
-    const settings=one('select * from project_settings where project_id=?',id)!,t=one('select * from transport where project_id=?',id)!;
-    const tracks:Track[]=rows('select t.*,v.handle from track t join visitor v on v.id=t.owner_id where project_id=? order by position',id).map(t=>({id:t.id,ownerId:t.owner_id,handle:t.handle,name:t.name,revision:t.revision,archivedAt:t.archived_at,clips:Object.fromEntries(rows('select c.*,r.document_json,r.source_text,r.provenance_json from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where c.track_id=?',t.id).map(c=>[c.slot,{id:c.id,revision:c.current_revision,document:JSON.parse(c.document_json),source:c.source_text,provenance:JSON.parse(c.provenance_json),history:rows('select revision,created_at as createdAt from clip_revision where clip_id=? order by revision desc limit 20',c.id)}]))}));
-    const cursor=one('select coalesce(max(id),0) as id from event where project_id=?',id)!.id;
-    const now=Date.now(),active=presence.get(id)??new Map();for(const [key,value] of active)if(value.until<now)active.delete(key);
-    const result:Snapshot={id,title:p!.title,revision:p!.revision,eventId:cursor,serverNowMs:now,you:{id:v.id,handle:v.handle},tracks,settings:{bpm:settings.bpm,sceneNames:JSON.parse(settings.scene_names_json),arrangement:JSON.parse(settings.arrangement_json),revision:settings.settings_revision},transport:{generation:t.generation,status:t.status,epochMs:t.epoch_ms,conductorId:t.lease_until>now?t.conductor_id:null,leaseUntil:t.lease_until,revision:t.revision},plans:plansFor(id,t.generation),presence:[...active].map(([id,x])=>({id,handle:x.handle,route:x.route}))};
-    db.exec('commit');return result;
-  }catch(e){db.exec('rollback');throw e;}
-}
 function syncCatalog(id:string,p:Plan){
   const active=rows('select * from track where project_id=? and archived_at is null order by position',id),ids=new Set(active.map(x=>x.id));
-  for(const key of Object.keys(p.catalog))if(!ids.has(key)){delete p.catalog[key];delete p.manual[key];delete p.mix[key];}
+  for(const key of Object.keys(p.catalog))if(!ids.has(key)){delete p.catalog[key];delete p.manual[key];delete p.mix[key];for(const s of SLOTS)delete p.sceneAssignments[s][key];}
   for(const t of active){
     p.catalog[t.id]=Object.fromEntries(rows('select c.slot,c.current_revision,r.document_json from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where c.track_id=?',t.id).map(c=>[c.slot,{revision:c.current_revision,document:JSON.parse(c.document_json)}]));
     p.mix[t.id]??={gain:0.7,mute:false};
     for(const s of SLOTS)p.sceneAssignments[s][t.id]=one('select clip_slot from scene_assignment where project_id=? and track_id=? and scene=?',id,t.id,s)?.clip_slot??null;
   }
 }
-function updatePlan(id:string,t:Row,bpm:number,edit:(p:Plan)=>void){
+function updatePlan(id:string,t:Row,bpm:number,edit:(p:Plan)=>void=()=>{}){
   const last=plansFor(id,t.generation).at(-1)??blankPlan();const p=structuredClone(last);
   p.generation=t.generation;p.planRevision=last.planRevision+1;
   p.effectiveCycle=t.status==='playing'?Math.max(last.effectiveCycle,nextBoundary(Date.now(),t.epoch_ms,bpm)):0;
@@ -119,188 +109,423 @@ function updatePlan(id:string,t:Row,bpm:number,edit:(p:Plan)=>void){
   if(keeper!==null)run('delete from performance_plan where project_id=? and generation=? and plan_revision<?',id,t.generation,keeper??0);
   return p.effectiveCycle;
 }
-function arrangement(raw:any):Arrangement{
-  need(raw && Array.isArray(raw.entries)&&raw.entries.length>0&&raw.entries.length<=8&&typeof raw.loop==='boolean','An arrangement has 1–8 entries and a Loop choice.');
-  return {loop:raw.loop,entries:raw.entries.map((x:any)=>{need(Number.isInteger(x.bars)&&x.bars>=1&&x.bars<=16,'Each scene runs for 1–16 bars.');return {scene:slot(x.scene),bars:x.bars};})};
+// Exposed for performances, whose guest parts join and leave the same plan.
+export function replan(id:string){const t=one('select * from transport where project_id=?',id)!,s=one('select bpm from project_settings where project_id=?',id)!;return updatePlan(id,t,s.bpm);}
+function startTransport(id:string,t:Row,now:number){
+  const p=structuredClone(plansFor(id,t.generation).at(-1)??blankPlan());p.generation=t.generation+1;p.planRevision=0;p.effectiveCycle=0;p.arrangement=null;syncCatalog(id,p);
+  run("update transport set status='playing',epoch_ms=?,generation=generation+1,revision=revision+1 where project_id=?",now+1200,id);savePlan(id,p);
+  run('delete from performance_plan where project_id=? and generation<?',id,t.generation+1);
 }
-export function command(v:Visitor,id:string,input:Record<string,any>){
-  need(typeof input.commandId==='string'&&/^[0-9a-f-]{36}$/i.test(input.commandId),'Command needs a UUID.');
-  const cid=input.commandId,type=text(input.type,50),payload=input.payload??{};
-  const hash=createHash('sha256').update(JSON.stringify({id,type,payload,expectedRevision:input.expectedRevision})).digest('hex');
-  const receipt=one('select * from command_receipt where visitor_id=? and command_id=?',v.id,cid);
-  if(receipt){need(receipt.request_hash===hash,'Command ID was reused with different content.',409);return JSON.parse(receipt.response_json);}
-  const now=Date.now(),bucket=buckets.get(v.id)??{tokens:20,at:now};bucket.tokens=Math.min(20,bucket.tokens+(now-bucket.at)*0.005);bucket.at=now;need(bucket.tokens>=1,'Too many changes. Try again shortly.',429);bucket.tokens--;buckets.set(v.id,bucket);if(buckets.size>1000)for(const [k,b]of buckets)if(now-b.at>60000)buckets.delete(k);
-  db.exec('begin immediate');
-  let entityId:string|null=null,entityRevision=0,effectiveCycle:number|undefined;
+function stopTransport(id:string,t:Row,bpm:number,now:number,releaseHost=false){
+  const cycle=t.epoch_ms?cycleAt(now,t.epoch_ms,bpm):0;
+  const latest=structuredClone(planAt(plansFor(id,t.generation),cycle)??plansFor(id,t.generation).at(-1)??blankPlan());latest.scene=sceneAt(latest,cycle);syncCatalog(id,latest);latest.generation=t.generation+1;latest.planRevision=0;latest.effectiveCycle=0;latest.arrangement=null;
+  run(`update transport set status='stopped',epoch_ms=null,generation=generation+1,revision=revision+1${releaseHost?',conductor_id=null,lease_until=0':''} where project_id=?`,id);savePlan(id,latest);
+  run('delete from performance_plan where project_id=? and generation<?',id,t.generation+1);
+}
+
+// --- snapshots --------------------------------------------------------------
+export const isOnline=(visitorId:string)=>(online.get(visitorId)??0)>Date.now();
+export function heartbeat(v:Visitor){online.set(v.id,Date.now()+30000);if(online.size>5000)for(const [k,u] of online)if(u<Date.now())online.delete(k);}
+function leaseOf(trackId:string){const l=leases.get(trackId);if(!l||l.until<Date.now()){leases.delete(trackId);return null;}return l;}
+function editorsNow(id:string){const m=editing.get(id)??new Map<string,number>(),now=Date.now();for(const [k,u] of m)if(u<now)m.delete(k);editing.set(id,m);return m;}
+function guestPerformers(id:string){const perf=livePerformance(id);return perf?rows("select visitor_id from performance_participant where performance_id=? and role='performer' and removed=0",perf.id).map(x=>x.visitor_id as string):[];}
+export function editCapacity(id:string,visitorId:string){
+  const active=new Set([...editorsNow(id).keys(),...guestPerformers(id)]);
+  const can=active.has(visitorId)||active.size<ROOM_LIMITS.editors;
+  return {count:active.size,limit:ROOM_LIMITS.editors,youCanEdit:can,...(can?{}:{reason:`${ROOM_LIMITS.editors} people are editing right now. You can listen and chat; editing opens when someone finishes.`})};
+}
+function claimEditing(id:string,v:Visitor){const cap=editCapacity(id,v.id);need(cap.youCanEdit,cap.reason!,409);editorsNow(id).set(v.id,Date.now()+ROOM_LIMITS.editingWindowMs);}
+function clipsOf(trackId:string,history:boolean){
+  return Object.fromEntries(rows('select c.*,r.schema_version,r.document_json,r.source_text,r.provenance_json,r.created_by,r.created_at,v.handle from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision join visitor v on v.id=r.created_by where c.track_id=?',trackId).map(c=>{
+    const document=JSON.parse(c.document_json) as AnyDocument;
+    return [c.slot,{id:c.id,slot:c.slot,revision:c.current_revision,schemaVersion:c.schema_version,document,source:sourceOf(document,c.source_text),provenance:JSON.parse(c.provenance_json),editedBy:{id:c.created_by,handle:c.handle},editedAt:c.created_at,
+      ...(history?{history:rows('select r.revision,r.created_at as createdAt,v.handle as by from clip_revision r join visitor v on v.id=r.created_by where clip_id=? order by revision desc limit 20',c.id)}:{})}];
+  }));
+}
+function partsOf(id:string,includeArchived:boolean):Part[]{
+  return rows(`select t.*,v.handle,v.friend_code from track t join visitor v on v.id=t.owner_id where t.project_id=? ${includeArchived?'':'and t.archived_at is null'} and (t.guest_performance_id is null or t.archived_at is null) order by t.position`,id).map(t=>({
+    id:t.id,name:t.name,role:roleOf(t.role),presetId:t.preset_id,presetVersion:t.preset_version,addedBy:{id:t.owner_id,handle:t.handle},revision:t.revision,archivedAt:t.archived_at,guest:!!t.guest_performance_id,clips:clipsOf(t.id,true),lease:leaseOf(t.id)}));
+}
+function settingsOf(id:string){const s=one('select * from project_settings where project_id=?',id)!;return {bpm:s.bpm,sceneNames:JSON.parse(s.scene_names_json),arrangement:JSON.parse(s.arrangement_json) as Arrangement,revision:s.settings_revision};}
+function transportOf(id:string,now:number){const t=one('select * from transport where project_id=?',id)!;const hostId=t.lease_until>now?t.conductor_id:null;return {generation:t.generation,status:t.status,epochMs:t.epoch_ms,hostId,hostHandle:hostId?handleOf(hostId):null,leaseUntil:t.lease_until,revision:t.revision};}
+export function roomSnapshot(v:Visitor,id:string):RoomSnapshot{
+  db.exec('begin');
   try{
-    const project=one('select * from project where id=?',id);need(project,'Piece not found.',404);persist(v);
-    const t=one('select * from transport where project_id=?',id)!,settings=one('select * from project_settings where project_id=?',id)!;
-    function version(row:Row,key='revision'){if(row[key]!==input.expectedRevision)throw new CommandError('This changed in another session. Your draft is safe.',409,row);}
-    function ownTrack(trackId:any){const tr=one('select * from track where id=? and project_id=?',trackId,id);need(tr,'Track not found.',404);need(tr!.owner_id===v.id,'This track belongs to someone else.',403);return tr!;}
-    function conductor(){need(t.conductor_id===v.id&&t.lease_until>now,'Take the conductor role first.',403);}
-    const plan=(edit:(p:Plan)=>void=()=>{})=>{effectiveCycle=updatePlan(id,t,settings.bpm,edit);};
-    const touchTrack=(tr:Row)=>{run('update track set revision=revision+1 where id=?',tr.id);entityId=tr.id;entityRevision=tr.revision+1;};
-    if(type==='track.create'){
-      const count=one('select count(*) as n from track where project_id=? and archived_at is null',id)!.n;
-      const own=one('select count(*) as n from track where project_id=? and owner_id=? and archived_at is null',id,v.id)!.n;
-      need(count<12&&own<2,'This piece has room for 12 tracks, with two per person.',409);
-      need(['drums','melody'].includes(payload.kind),'Choose drums or melody.');
-      entityId=newTrack(v,id,text(payload.name??(payload.kind==='drums'?'Drums':'Melody'),40),payload.kind);entityRevision=1;plan();
-    }else if(['track.rename','track.archive','track.restore','scene.assign','track.launch','track.follow','track.mix'].includes(type)){
-      const tr=ownTrack(payload.trackId);version(tr);
-      if(type==='track.rename')run('update track set name=? where id=?',text(payload.name,40),tr.id);
-      if(type==='track.archive')run('update track set archived_at=? where id=?',now,tr.id);
-      if(type==='track.restore'){
-        need(one('select count(*) as n from track where project_id=? and archived_at is null',id)!.n<12&&one('select count(*) as n from track where project_id=? and owner_id=? and archived_at is null',id,v.id)!.n<2,'No space for that track yet.',409);run('update track set archived_at=null where id=?',tr.id);
-      }
-      if(type==='scene.assign')run('update scene_assignment set clip_slot=? where project_id=? and scene=? and track_id=?',payload.clipSlot===null?null:slot(payload.clipSlot),id,slot(payload.scene),tr.id);
-      touchTrack(tr);
-      plan(p=>{
-        if(type==='track.launch')p.manual[tr.id]=payload.clipSlot===null?null:slot(payload.clipSlot);
-        if(type==='track.follow')delete p.manual[tr.id];
-        if(type==='track.mix'){need(typeof payload.gain==='number'&&payload.gain>=0&&payload.gain<=1&&typeof payload.mute==='boolean','Mixer values are volume 0–1 and mute on/off.');p.mix[tr.id]={gain:payload.gain,mute:payload.mute};}
-      });
-    }else if(type==='clip.publish'||type==='clip.restore'){
-      const tr=ownTrack(payload.trackId),s=slot(payload.slot);need(!tr.archived_at,'Restore the track first.',409);
-      const c=one('select * from clip where track_id=? and slot=?',tr.id,s);
-      if((c?.current_revision??0)!==input.expectedRevision)throw new CommandError('Clip changed in another session. Keep your draft or load the saved version.',409,c);
-      let doc,source:string|null=null,provenance:Row={};
-      if(type==='clip.restore'){
-        const old=c&&one('select * from clip_revision where clip_id=? and revision=?',c.id,payload.revision);need(old,'That revision is unavailable.',404);doc=validateDocument(JSON.parse(old!.document_json));source=old!.source_text;provenance={restoredFrom:payload.revision};
-      }else{
-        doc=validateDocument(payload.document);provenance=payload.provenance&&typeof payload.provenance==='object'?{...payload.provenance}:{};
-        need(JSON.stringify(provenance).length<=1024,'Proposal attribution is too long.');
-        if(payload.source!=null){source=text(payload.source,8192);need(JSON.stringify(parseCode(source))===JSON.stringify(doc),'Code and visual pattern disagree.');}
-      }
-      entityRevision=(c?.current_revision??0)+1;
-      if(c){entityId=c.id;run('update clip set current_revision=? where id=?',entityRevision,c.id);run('insert into clip_revision values(?,?,1,?,?,?,?,?)',c.id,entityRevision,JSON.stringify(doc),source,JSON.stringify(provenance),v.id,now);}
-      else entityId=newClip(v,tr.id,s,doc,source,provenance);
-      plan();
-      run('delete from clip_revision where clip_id=? and revision<=?',entityId,entityRevision-20);
-    }else if(type==='conductor.claim'){
-      version(t);need(!t.conductor_id||t.lease_until<=now||t.conductor_id===v.id,'Someone is conducting. Wait or ask them to release.',409);
-      run('update transport set conductor_id=?,lease_until=?,revision=revision+1 where project_id=?',v.id,now+30000,id);entityRevision=t.revision+1;
-    }else if(type==='conductor.renew'){
-      conductor();run('update transport set lease_until=? where project_id=?',now+30000,id);entityRevision=t.revision;
-    }else if(type==='conductor.release'){
-      conductor();version(t);run('update transport set conductor_id=null,lease_until=0,revision=revision+1 where project_id=?',id);entityRevision=t.revision+1;
-    }else if(['tempo.set','scene.rename','arrangement.save'].includes(type)){
-      conductor();version(settings,'settings_revision');
-      if(type==='tempo.set'){need(t.status==='stopped','Stop the ensemble before changing tempo.',409);need(Number.isInteger(payload.bpm)&&payload.bpm>=60&&payload.bpm<=180,'Tempo is 60–180 BPM.');run('update project_settings set bpm=? where project_id=?',payload.bpm,id);}
-      if(type==='scene.rename'){const names=JSON.parse(settings.scene_names_json);names[slot(payload.scene)]=text(payload.name,30);run('update project_settings set scene_names_json=? where project_id=?',JSON.stringify(names),id);}
-      if(type==='arrangement.save')run('update project_settings set arrangement_json=? where project_id=?',JSON.stringify(arrangement(payload)),id);
-      run('update project_settings set settings_revision=settings_revision+1 where project_id=?',id);entityRevision=settings.settings_revision+1;
-    }else if(['transport.start','transport.stop','scene.launch','arrangement.start','arrangement.stop'].includes(type)){
-      conductor();version(t);entityRevision=t.revision+1;
-      if(type==='transport.start'){
-        need(t.status==='stopped','The ensemble is already playing.',409);const p=structuredClone(plansFor(id,t.generation).at(-1)??blankPlan());p.generation=t.generation+1;p.planRevision=0;p.effectiveCycle=0;p.arrangement=null;syncCatalog(id,p);
-        run("update transport set status='playing',epoch_ms=?,generation=generation+1 where project_id=?",now+1200,id);savePlan(id,p);
-      }else if(type==='transport.stop'){
-        const cycle=t.epoch_ms?cycleAt(now,t.epoch_ms,settings.bpm):0;
-        const latest=structuredClone(planAt(plansFor(id,t.generation),cycle)??blankPlan());latest.scene=sceneAt(latest,cycle);syncCatalog(id,latest);latest.generation=t.generation+1;latest.planRevision=0;latest.effectiveCycle=0;latest.arrangement=null;
-        run("update transport set status='stopped',epoch_ms=null,generation=generation+1 where project_id=?",id);savePlan(id,latest);
-      }else plan(p=>{
-        if(type==='scene.launch'){p.scene=slot(payload.scene);p.arrangement=null;}
-        if(type==='arrangement.start'){need(t.status==='playing','Start the ensemble first.',409);p.arrangement={...arrangement(JSON.parse(settings.arrangement_json)),startCycle:p.effectiveCycle};}
-        if(type==='arrangement.stop'){p.scene=sceneAt(p,p.effectiveCycle);p.arrangement=null;}
-      });
-      run('update transport set revision=revision+1 where project_id=?',id);
-      run('delete from performance_plan where project_id=? and generation<(select generation from transport where project_id=?)',id,id);
-    }else throw new CommandError('Unknown studio command.');
-    // Lease renewal is durable, but not a stream of musical/history events.
-    const silent=type==='conductor.renew';if(!silent)run('update project set revision=revision+1,updated_at=? where id=?',now,id);
-    const eid=silent?Number(one('select coalesce(max(id),0) as id from event where project_id=?',id)!.id):event(id,v.id,type,entityId,cid);
-    const result={ok:true,commandId:cid,projectRevision:Number(project!.revision)+(silent?0:1),entityId,entityRevision,eventId:eid,...(effectiveCycle!==undefined?{effectiveCycle}:{})};
-    run('insert into command_receipt values(?,?,?,?,?)',v.id,cid,hash,JSON.stringify(result),now);
-    run('delete from command_receipt where created_at<?',now-7*86400000);
-    db.exec('commit');if(!silent)emit(v,id,eid,type,entityId,cid);return result;
+    const a=projectAccess(v,id);if(!a||a.read!=='member')throw hidden();
+    const p=a.project,now=Date.now(),here=sweepRoom(roomPresence.get(id)??new Map());
+    const members:Member[]=rows('select m.visitor_id,m.role,v.handle,v.friend_code from project_member m join visitor v on v.id=m.visitor_id where m.project_id=? and m.removed_at is null order by m.joined_at',id).map(m=>({id:m.visitor_id,handle:m.handle,code:m.friend_code??'',role:m.role,online:isOnline(m.visitor_id),here:here.has(m.visitor_id)}));
+    const t=one('select generation from transport where project_id=?',id)!,perf=livePerformance(id);
+    const me=one('select handle,friend_code from visitor where id=?',v.id);
+    const result:RoomSnapshot={access:'member',id,title:p.title,visibility:p.visibility,migratedPublic:!!p.migrated_public&&a.role==='owner',revision:p.revision,eventId:Number(one("select coalesce(max(id),0) as id from event where scope=?",`member:${id}`)!.id),serverNowMs:now,
+      you:{id:v.id,handle:me?.handle??v.handle,code:me?.friend_code??'',role:a.role!},members,parts:partsOf(id,true),settings:settingsOf(id),transport:transportOf(id,now),plans:plansFor(id,t.generation),
+      presence:[...here].map(([pid,x])=>({id:pid,handle:x.handle})),
+      performance:perf?{id:perf.id,title:perf.title,visibility:perf.visibility,hostId:perf.host_id,startedAt:perf.started_at,...(perf.visibility==='unlisted'?{listenToken:derive(`listen:${perf.id}:${perf.link_version}`)}:{})}:null,
+      editors:editCapacity(id,v.id),
+      viewToken:a.role==='owner'&&p.visibility==='unlisted'?derive(`view:${id}:${p.view_link_version}`):null};
+    db.exec('commit');return result;
+  }catch(e){db.exec('rollback');throw e;}
+}
+// What a non-member may see of a public or unlisted project: the saved mix and
+// public credits. No members, chat, drafts, history, presence or invitations.
+export function viewSnapshot(v:Visitor,id:string):ViewSnapshot{
+  const a=readProject(v,id),p=a.project,t=one('select generation from transport where project_id=?',id)!;
+  const plan=plansFor(id,t.generation).at(-1)??blankPlan();
+  const perf=livePerformance(id);
+  return {access:'view',id,title:p.title,visibility:p.visibility,bpm:settingsOf(id).bpm,
+    parts:rows("select t.id,t.name,t.role,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null and t.guest_performance_id is null order by t.position",id).map(t=>{
+      const c=one("select c.current_revision,r.document_json,r.source_text from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where c.track_id=? and c.slot='A'",t.id);
+      const document=c?JSON.parse(c.document_json):emptyClip();
+      return {id:t.id,name:t.name,role:roleOf(t.role),addedBy:t.handle,document,source:sourceOf(document,c?.source_text),gain:plan.mix[t.id]?.gain??0.7,mute:plan.mix[t.id]?.mute??false};
+    }),
+    performance:perf&&perf.visibility==='public'?{id:perf.id,title:perf.title}:null};
+}
+export function snapshot(v:Visitor,id:string){const a=projectAccess(v,id);if(!a)throw hidden();return a.read==='member'?roomSnapshot(v,id):viewSnapshot(v,id);}
+
+// --- commands ---------------------------------------------------------------
+type Envelope={commandId?:unknown;type?:unknown;expectedRevision?:unknown;payload?:any};
+export function command(v:Visitor,id:string,input:Envelope){
+  const type=text(input.type,50,'a command type'),payload=input.payload&&typeof input.payload==='object'?input.payload:{};
+  try{
+    const {cid,hash,replay}=receiptFor(v,input.commandId,`project:${id}`,{type,payload,expectedRevision:input.expectedRevision});
+    if(replay)return replay;
+    limit(`cmd:${v.id}`,20,5);
+    const result=tx(after=>{
+      const a=projectAccess(v,id);if(!a)throw hidden();
+      need(a.read==='member','Only members of this mix can change it. Ask the owner for an invitation.',403);
+      persist(v);
+      const out=apply(v,a,type,payload,input.expectedRevision,cid,after);
+      saveReceipt(v,cid,hash,out);return out;
+    });
+    return result;
   }catch(e){
-    db.exec('rollback');const refused=e instanceof CommandError?e:new CommandError(e instanceof Error?e.message:'Invalid command.');
-    // A refusal is the other half of who-did-what: someone tried to change what isn't theirs.
-    logAction(v,`${type}.refused`,{project:id.slice(0,8),status:refused.status,reason:refused.message,...trackLabel(payload.trackId)},'warn');throw refused;
+    const refused=e instanceof CommandError?e:new CommandError(e instanceof Error?e.message:'Invalid command.');
+    // A refusal is the other half of who-did-what.
+    logAction(v,`${type}.refused`,{project:id.slice(0,8),status:refused.status,reason:refused.message,...partLabel(payload.trackId)},'warn');
+    throw refused;
   }
 }
-export function projectStream(id:string,v:Visitor,res:ServerResponse,cursor:number){
-  need(one('select id from project where id=?',id),'Piece not found.',404);
-  const set=listeners.get(id)??new Set();need([...listeners.values()].reduce((n,s)=>n+s.size,0)<64&&[...set].filter(x=>x.visitorId===v.id).length<2,'Live connection capacity reached. Retry shortly.',429);
-  const newest=one('select coalesce(max(id),0) as id from event where project_id=?',id)!.id;
-  const missed=rows('select * from event where project_id=? and id>? order by id limit 501',id,cursor);
-  res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache, no-transform','x-accel-buffering':'no'});res.write(': open\n\n');
-  if(missed.length>500)res.write(`id: ${newest}\nevent: reset\ndata: {}\n\n`);
-  else for(const e of missed)res.write(`id: ${e.id}\nevent: change\ndata: ${JSON.stringify({projectId:id,kind:e.kind})}\n\n`);
-  const listener={visitorId:v.id,res};set.add(listener);listeners.set(id,set);
-  // A named beat, not a comment: browsers hide comments, and the client needs
-  // a pulse to notice a connection that died without closing.
-  const timer=setInterval(()=>res.write('event: beat\ndata: {}\n\n'),5000);res.on('close',()=>{clearInterval(timer);set.delete(listener);if(!set.size)listeners.delete(id);});
+function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknown,cid:string,after:(f:()=>void)=>void){
+  const id=a.project.id as string,now=Date.now(),owner=a.role==='owner';
+  const t=one('select * from transport where project_id=?',id)!,settings=one('select * from project_settings where project_id=?',id)!;
+  const hostId=t.lease_until>now?t.conductor_id:null,isHost=hostId===v.id;
+  let entityId:string|null=null,entityRevision=0,effectiveCycle:number|undefined,kind=type,view=false,audience=false,changed=true;
+  const version=(row:Row,key='revision')=>{if(expected!==undefined&&row[key]!==expected)throw new CommandError('This changed in another session. Your draft is safe.',409,row);};
+  const plan=(edit?:(p:Plan)=>void)=>{effectiveCycle=updatePlan(id,one('select * from transport where project_id=?',id)!,settings.bpm,edit);audience=true;view=true;};
+  const host=()=>need(isHost,hostId?`${handleOf(hostId)} is hosting. Ask them, or wait for the host role to free up.`:'Take the host role first.',403);
+  const part=(trackId:unknown,allowGuest=false)=>{const tr=one('select * from track where id=? and project_id=?',trackId,id);need(tr,'That part is not in this mix.',404);if(!allowGuest)need(!tr!.guest_performance_id,'Guest parts belong to their performer. Use Keep in project to save a copy.',403);return tr!;};
+  const free=(tr:Row)=>{const l=leaseOf(tr.id);if(l&&l.visitorId!==v.id)throw new CommandError(`${l.handle} is editing this part. Duplicate it, ask in chat, or try again when they finish.`,409,{lease:l});};
+  const capacity=()=>need(Number(one('select count(*) as n from track where project_id=? and archived_at is null',id)!.n)<ROOM_LIMITS.parts,`This mix has room for ${ROOM_LIMITS.parts} parts. Remove one to add another.`,409);
+  const touchTrack=(tr:Row)=>{run('update track set revision=revision+1 where id=?',tr.id);entityId=tr.id;entityRevision=tr.revision+1;};
+  const writeRevision=(tr:Row,s:Slot,doc:AnyDocument,source:string|null,provenance:Row)=>{
+    const c=one('select * from clip where track_id=? and slot=?',tr.id,s);
+    if(expected!==undefined&&(c?.current_revision??0)!==expected)throw new CommandError('Someone saved this part while you were editing. Your draft is safe: keep it, load theirs, or save yours as a new part.',409,{clip:c?{revision:c.current_revision}:null});
+    const revision=(c?.current_revision??0)+1,schema=doc.schemaVersion;
+    let clipId=c?.id as string|undefined;
+    if(c)run('update clip set current_revision=? where id=?',revision,c.id);
+    else{clipId=randomUUID();run('insert into clip values(?,?,?,?)',clipId,tr.id,s,revision);}
+    run('insert into clip_revision values(?,?,?,?,?,?,?,?)',clipId,revision,schema,JSON.stringify(doc),source,JSON.stringify(provenance),v.id,now);
+    run('delete from clip_revision where clip_id=? and revision<=?',clipId,revision-ROOM_LIMITS.revisionsKept);
+    entityId=tr.id;entityRevision=revision;
+  };
+  const newPart=(name:string,role:string|null,presetId:string|null,presetVersion:number|null,source:string,provenance:Row,owner:string=v.id,guest:string|null=null)=>{
+    const doc=parseSource(source).document,trackId=randomUUID(),position=Number(one('select coalesce(max(position),-1)+1 as p from track where project_id=?',id)!.p);
+    run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,guest_performance_id) values(?,?,?,?,?,1,null,?,?,?,?)',trackId,id,owner,name,position,role,presetId,presetVersion,guest);
+    const clipId=randomUUID();run('insert into clip values(?,?,?,1)',clipId,trackId,'A');
+    run('insert into clip_revision values(?,1,2,?,?,?,?,?)',clipId,JSON.stringify(doc),source,JSON.stringify(provenance),v.id,now);
+    for(const s of SLOTS)run('insert into scene_assignment values(?,?,?,?)',id,s,trackId,'A');
+    entityId=trackId;entityRevision=1;return trackId;
+  };
+  const sound=(p:any)=>{
+    if(typeof p.presetId==='string'){const preset=presetById(p.presetId,typeof p.presetVersion==='number'?p.presetVersion:undefined);need(preset,'That sound is not in the catalogue.',404);return {name:preset!.name,role:preset!.role,presetId:preset!.id,presetVersion:preset!.version,source:preset!.source,provenance:{preset:{id:preset!.id,version:preset!.version}}};}
+    if(typeof p.soundId==='string'){const s=one('select * from user_sound where id=? and visitor_id=?',p.soundId,v.id);need(s,'That saved sound is not yours or no longer exists.',404);return {name:s!.name,role:s!.role,presetId:null,presetVersion:null,source:s!.source,provenance:{sound:{id:s!.id,...JSON.parse(s!.attribution_json)}}};}
+    const source=code(p.source),name=text(p.name??'My part',40,'the part a name');parseSource(source);
+    return {name,role:(ROLES as readonly string[]).includes(p.role)?p.role:null,presetId:null,presetVersion:null,source,provenance:{via:'code'}};
+  };
+  switch(type){
+    case 'part.add':{
+      capacity();claimEditing(id,v);const s=sound(payload);
+      newPart(s.name,s.role,s.presetId,s.presetVersion,s.source,s.provenance);plan();
+      // "Add and play": the host's first addition may start the shared mix.
+      if(payload.play===true&&t.status==='stopped'&&(isHost||!hostId)){
+        run('update transport set conductor_id=?,lease_until=? where project_id=?',v.id,now+ROOM_LIMITS.hostLeaseMs,id);
+        startTransport(id,one('select * from transport where project_id=?',id)!,now);effectiveCycle=0;
+      }
+      break;
+    }
+    case 'part.edit':case 'part.swap':case 'part.restore':{
+      const tr=part(payload.trackId),s=slot(payload.slot??'A');need(!tr.archived_at,'Bring this part back first.',409);free(tr);claimEditing(id,v);
+      if(type==='part.edit'){
+        const source=code(payload.source),doc=parseSource(source).document;
+        writeRevision(tr,s,doc,source,{via:payload.via==='shape'?'shape':'code',...(tr.preset_id?{basedOn:{preset:tr.preset_id,version:tr.preset_version}}:{})});
+      }else if(type==='part.swap'){
+        const n=sound(payload);writeRevision(tr,s,parseSource(n.source).document,n.source,{...n.provenance,via:'swap'});
+        run('update track set name=?,role=?,preset_id=?,preset_version=? where id=?',n.name,n.role,n.presetId,n.presetVersion,tr.id);
+      }else{
+        const c=one('select * from clip where track_id=? and slot=?',tr.id,s);const old=c&&one('select * from clip_revision where clip_id=? and revision=?',c.id,payload.revision);need(old,'That revision is unavailable.',404);
+        const doc=validateAny(JSON.parse(old!.document_json));writeRevision(tr,s,doc,old!.source_text,{restoredFrom:payload.revision});
+      }
+      run('update track set revision=revision+1 where id=?',tr.id);plan();
+      break;
+    }
+    case 'part.mix':{
+      const tr=part(payload.trackId,true);version(tr);
+      if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest parts belong to their performer.',403);
+      const current=(plansFor(id,t.generation).at(-1)?.mix[tr.id])??{gain:0.7,mute:false};
+      const gain=payload.gain===undefined?current.gain:payload.gain,mute=payload.mute===undefined?current.mute:payload.mute;
+      need(typeof gain==='number'&&Number.isFinite(gain)&&gain>=0&&gain<=1&&typeof mute==='boolean','Volume is 0–1 and mute is on or off.');
+      touchTrack(tr);plan(p=>{p.mix[tr.id]={gain,mute};});break;
+    }
+    case 'part.rename':{const tr=part(payload.trackId);version(tr);run('update track set name=? where id=?',text(payload.name,40,'the part a name'),tr.id);touchTrack(tr);view=true;audience=true;break;}
+    case 'part.remove':{const tr=part(payload.trackId);version(tr);free(tr);run('update track set archived_at=? where id=?',now,tr.id);leases.delete(tr.id);touchTrack(tr);plan();break;}
+    case 'part.return':{const tr=part(payload.trackId);need(tr.archived_at,'That part is already in the mix.',409);capacity();run('update track set archived_at=null where id=?',tr.id);touchTrack(tr);plan();break;}
+    case 'part.duplicate':case 'part.keep':{
+      const tr=part(payload.trackId,type==='part.keep');capacity();claimEditing(id,v);
+      if(type==='part.keep')need(tr.guest_performance_id,'Only guest parts need keeping.',409);
+      const c=one("select r.*,c.slot from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where c.track_id=? and c.slot=?",tr.id,payload.slot??'A');need(c,'That part has no saved sound to copy.',404);
+      const doc=validateAny(JSON.parse(c!.document_json)),source=sourceOf(doc,c!.source_text);
+      const provenance=type==='part.keep'?{keptBy:v.handle,fromPerformance:tr.guest_performance_id}:{duplicatedFrom:{part:tr.name,by:handleOf(tr.owner_id)}};
+      newPart(type==='part.keep'?tr.name:`${tr.name} copy`.slice(0,40),tr.role,tr.preset_id,tr.preset_version,source,provenance,type==='part.keep'?tr.owner_id:v.id);
+      plan();break;
+    }
+    case 'part.slot':{
+      const tr=part(payload.trackId);version(tr);touchTrack(tr);
+      plan(p=>{if(payload.slot==='follow')delete p.manual[tr.id];else p.manual[tr.id]=payload.slot===null?null:slot(payload.slot);});break;
+    }
+    case 'scene.assign':{const tr=part(payload.trackId);version(tr);run('update scene_assignment set clip_slot=? where project_id=? and scene=? and track_id=?',payload.clipSlot===null?null:slot(payload.clipSlot),id,slot(payload.scene),tr.id);touchTrack(tr);plan();break;}
+    case 'part.lease':{
+      const tr=part(payload.trackId,true);if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest parts belong to their performer.',403);
+      free(tr);claimEditing(id,v);const had=leaseOf(tr.id);leases.set(tr.id,{visitorId:v.id,handle:handleOf(v.id),until:now+ROOM_LIMITS.leaseMs,projectId:id});
+      entityId=tr.id;changed=!had;break;
+    }
+    case 'part.release':{
+      const tr=part(payload.trackId,true),l=leaseOf(tr.id);entityId=tr.id;
+      if(l&&l.visitorId!==v.id)need(owner&&payload.force===true,`${l.handle} is editing this part.`,403);
+      changed=!!l;leases.delete(tr.id);break;
+    }
+    case 'project.rename':{run('update project set title=? where id=?',text(payload.title,60,'the mix a name'),id);entityId=id;view=true;audience=true;break;}
+    case 'project.visibility':{
+      need(owner,'Only the owner can change who can see this mix.',403);need(VISIBILITIES.includes(payload.visibility),'Choose private, unlisted or public.');
+      // Any change away from, or back to, unlisted retires the old view link.
+      run('update project set visibility=?,view_link_version=view_link_version+?,migrated_public=0 where id=?',payload.visibility,a.project.visibility!==payload.visibility?1:0,id);
+      run("delete from capability_grant where kind='view' and resource_id=?",id);
+      entityId=id;after(revalidate);break;
+    }
+    case 'project.rotateLink':{need(owner,'Only the owner can change the view link.',403);run('update project set view_link_version=view_link_version+1 where id=?',id);run("delete from capability_grant where kind='view' and resource_id=?",id);entityId=id;after(revalidate);break;}
+    case 'project.acknowledge':{need(owner,'Only the owner sees this note.',403);run('update project set migrated_public=0 where id=?',id);entityId=id;break;}
+    case 'member.remove':case 'member.leave':{
+      const target=type==='member.leave'?v.id:payload.visitorId;
+      if(type==='member.remove')need(owner,'Only the owner manages membership.',403);
+      const m=one('select * from project_member where project_id=? and visitor_id=? and removed_at is null',id,target);need(m,'That person is not a member.',404);
+      need(m!.role!=='owner','The owner stays with the mix. Make it private instead of leaving.',409);
+      run('update project_member set removed_at=? where project_id=? and visitor_id=?',now,id,target);
+      for(const [k,l] of leases)if(l.projectId===id&&l.visitorId===target)leases.delete(k);
+      if(hostId===target)run('update transport set conductor_id=null,lease_until=0,revision=revision+1 where project_id=?',id);
+      entityId=target;after(revalidate);break;
+    }
+    case 'host.claim':{need(!hostId||isHost,`${hostId?handleOf(hostId):'Someone'} is hosting.`,409);run('update transport set conductor_id=?,lease_until=?,revision=revision+1 where project_id=?',v.id,now+ROOM_LIMITS.hostLeaseMs,id);entityRevision=t.revision+1;break;}
+    case 'host.pass':{host();need(memberRole(id,payload.visitorId),'Hosting passes to a member of this mix.',404);run('update transport set conductor_id=?,lease_until=?,revision=revision+1 where project_id=?',payload.visitorId,now+ROOM_LIMITS.hostLeaseMs,id);entityId=payload.visitorId;audience=true;break;}
+    case 'host.release':{host();run('update transport set conductor_id=null,lease_until=0,revision=revision+1 where project_id=?',id);break;}
+    case 'transport.start':{
+      need(t.status==='stopped','The mix is already playing.',409);
+      if(!isHost){need(!hostId,`${hostId?handleOf(hostId):''} is hosting. Only the host starts the shared mix.`,403);run('update transport set conductor_id=?,lease_until=? where project_id=?',v.id,now+ROOM_LIMITS.hostLeaseMs,id);}
+      startTransport(id,one('select * from transport where project_id=?',id)!,now);entityRevision=t.revision+1;audience=true;break;
+    }
+    case 'transport.stop':{need(t.status==='playing','The mix is already stopped.',409);need(isHost||owner,'Only the host stops the shared mix.',403);stopTransport(id,t,settings.bpm,now);entityRevision=t.revision+1;audience=true;break;}
+    case 'tempo.set':{host();need(t.status==='stopped','Stop the mix before changing tempo.',409);need(Number.isInteger(payload.bpm)&&payload.bpm>=60&&payload.bpm<=180,'Tempo is 60–180 BPM.');run('update project_settings set bpm=?,settings_revision=settings_revision+1 where project_id=?',payload.bpm,id);plan();break;}
+    case 'scene.rename':{host();const names=JSON.parse(settings.scene_names_json);names[slot(payload.scene)]=text(payload.name,30,'the scene a name');run('update project_settings set scene_names_json=?,settings_revision=settings_revision+1 where project_id=?',JSON.stringify(names),id);break;}
+    case 'arrangement.save':{host();run('update project_settings set arrangement_json=?,settings_revision=settings_revision+1 where project_id=?',JSON.stringify(arrangement(payload)),id);break;}
+    case 'scene.launch':case 'arrangement.start':case 'arrangement.stop':{
+      host();
+      plan(p=>{
+        if(type==='scene.launch'){p.scene=slot(payload.scene);p.arrangement=null;}
+        if(type==='arrangement.start'){need(t.status==='playing','Start the mix first.',409);p.arrangement={...arrangement(JSON.parse(settings.arrangement_json)),startCycle:p.effectiveCycle};}
+        if(type==='arrangement.stop'){p.scene=sceneAt(p,p.effectiveCycle);p.arrangement=null;}
+      });
+      run('update transport set revision=revision+1 where project_id=?',id);break;
+    }
+    default:throw new CommandError('Unknown command.');
+  }
+  if(changed){
+    run('update project set revision=revision+1,updated_at=? where id=?',now,id);
+    const eventId=announce(after,v,id,kind,entityId,cid,{view,audience});
+    return {ok:true,commandId:cid,projectRevision:Number(a.project.revision)+1,entityId,entityRevision,eventId,...(effectiveCycle!==undefined?{effectiveCycle}:{})};
+  }
+  return {ok:true,commandId:cid,projectRevision:Number(a.project.revision),entityId,entityRevision,eventId:0};
 }
-export function updatePresence(id:string,v:Visitor,route:unknown){
-  need(one('select id from project where id=?',id),'Piece not found.',404);const p=presence.get(id)??new Map();
-  for(const [key,value] of p)if(value.until<Date.now())p.delete(key);
-  need(p.has(v.id)||p.size<64,'Presence capacity reached.',429);if(!p.has(v.id))logAction(v,'presence.join',{project:id.slice(0,8),route:route==='perform'?'perform':'compose'});p.set(v.id,{handle:v.handle,route:route==='perform'?'perform':'compose',until:Date.now()+30000});presence.set(id,p);
+function arrangement(raw:any):Arrangement{
+  need(raw&&Array.isArray(raw.entries)&&raw.entries.length>0&&raw.entries.length<=8&&typeof raw.loop==='boolean','An arrangement has 1–8 entries and a Loop choice.');
+  return {loop:raw.loop,entries:raw.entries.map((x:any)=>{need(Number.isInteger(x.bars)&&x.bars>=1&&x.bars<=16,'Each scene runs for 1–16 bars.');return {scene:slot(x.scene),bars:x.bars};})};
 }
-export function exportProject(id:string,v:Visitor){const s=snapshot(id,v);return {format:'stream',schemaVersion:1,title:s.title,settings:s.settings,tracks:s.tracks.filter(t=>!t.archivedAt).map(t=>({id:t.id,name:t.name,clips:Object.fromEntries(Object.entries(t.clips).map(([slot,c])=>[slot,{document:c!.document,source:c!.source,provenance:c!.provenance}]))})),plan:s.plans.at(-1)};}
+
+// --- presence, leases and streams ----------------------------------------------
+// The room heartbeat keeps a member visible to the room and renews the host's
+// lease: hosting lasts as long as the host's page is connected.
+export function roomHeartbeat(v:Visitor,id:string){
+  const a=projectAccess(v,id);if(!a||a.read!=='member')throw hidden();
+  heartbeat(v);const p=roomPresence.get(id)??new Map(),first=!p.has(v.id);
+  sweepRoom(p);need(p.has(v.id)||p.size<64,'Room presence is full.',429);
+  p.set(v.id,{handle:handleOf(v.id),until:Date.now()+30000});roomPresence.set(id,p);
+  const now=Date.now();
+  run('update transport set lease_until=? where project_id=? and conductor_id=? and lease_until>?',now+ROOM_LIMITS.hostLeaseMs,id,v.id,now);
+  for(const l of leases.values())if(l.projectId===id&&l.visitorId===v.id)l.until=now+ROOM_LIMITS.leaseMs;
+  if(first){logAction(v,'presence.join',{project:id.slice(0,8)});broadcast(`member:${id}`,0,'presence');}
+}
+export function projectStream(id:string,v:Visitor,res:import('node:http').ServerResponse,cursor:number){
+  const a=projectAccess(v,id);if(!a)throw hidden();
+  if(a.read==='member')openStream(res,v.id,`member:${id}`,cursor,()=>!!memberRole(id,v.id));
+  else openStream(res,v.id,`view:${id}`,cursor,()=>{const x=projectAccess(v,id);return !!x;});
+}
+
+// A host who has gone away does not leave the room playing unattended: once
+// the lease lapses, the shared mix stops and any member may take over.
+function sweepHosts(){
+  const now=Date.now();
+  for(const t of rows("select * from transport where status='playing' and lease_until<=?",now)){
+    try{tx(after=>{const fresh=one('select * from transport where project_id=?',t.project_id)!;if(fresh.status!=='playing'||fresh.lease_until>now)return;
+      const bpm=one('select bpm from project_settings where project_id=?',t.project_id)!.bpm;stopTransport(t.project_id,fresh,bpm,now,true);
+      run('update project set revision=revision+1 where id=?',t.project_id);announce(after,null,t.project_id,'host.lost',null,null,{audience:true});});}
+    catch(e){console.error(JSON.stringify({at:now,level:'error',msg:'host sweep failed',message:e instanceof Error?e.message:String(e)}));}
+  }
+  for(const [k,l] of leases)if(l.until<now){leases.delete(k);broadcast(`member:${l.projectId}`,0,'lease');}
+}
+setInterval(sweepHosts,2000).unref();
+
+// --- chat (members only) ------------------------------------------------------
+export function projectChat(v:Visitor,id:string,before:unknown){
+  const a=projectAccess(v,id);if(!a||a.read!=='member')throw hidden();
+  const cursor=Number(before);const limitRows=ROOM_LIMITS.chatPage;
+  const list=rows(`select c.id,c.visitor_id,c.client_id,c.body,c.created_at,c.deleted_at,v.handle from project_chat c join visitor v on v.id=c.visitor_id where c.project_id=? ${Number.isFinite(cursor)&&cursor>0?'and c.id<?':''} order by c.id desc limit ?`,...(Number.isFinite(cursor)&&cursor>0?[id,cursor,limitRows+1]:[id,limitRows+1]));
+  return {messages:list.slice(0,limitRows).reverse().map(chatRow),more:list.length>limitRows};
+}
+export const chatRow=(c:Row)=>({id:c.id,authorId:c.visitor_id,author:c.handle,clientId:c.client_id,body:c.deleted_at?null:c.body,deleted:!!c.deleted_at,createdAt:c.created_at});
+export function chatBody(x:unknown){need(typeof x==='string','Write a message.');const body=(x as string).replace(/\r\n?/g,'\n').trim();need(body.length>0,'Write a message.');need(body.length<=ROOM_LIMITS.chatLength,`Messages are at most ${ROOM_LIMITS.chatLength} characters.`,413);return body;}
+export function sendProjectChat(v:Visitor,id:string,input:Row){
+  const clientId=typeof input.clientId==='string'&&/^[0-9a-f-]{36}$/i.test(input.clientId)?input.clientId:null;need(clientId,'Message needs a client id.');
+  const body=chatBody(input.body);
+  return tx(after=>{
+    const a=projectAccess(v,id);if(!a||a.read!=='member')throw hidden();
+    // A retried send returns the message it already made.
+    const existing=one('select c.*,v.handle from project_chat c join visitor v on v.id=c.visitor_id where project_id=? and visitor_id=? and client_id=?',id,v.id,clientId);
+    if(existing)return {message:chatRow(existing)};
+    limit(`chat:${v.id}`,6,1,'You are sending messages quickly. Wait a moment.');
+    const msgId=Number(run('insert into project_chat(project_id,visitor_id,client_id,body,created_at) values(?,?,?,?,?)',id,v.id,clientId,body,Date.now()).lastInsertRowid);
+    announce(after,v,id,'chat',String(msgId),null,{log:{message:msgId}});
+    return {message:chatRow(one('select c.*,v.handle from project_chat c join visitor v on v.id=c.visitor_id where c.id=?',msgId)!)};
+  });
+}
+export function deleteProjectChat(v:Visitor,id:string,messageId:unknown){
+  return tx(after=>{
+    const a=projectAccess(v,id);if(!a||a.read!=='member')throw hidden();
+    const m=one('select * from project_chat where id=? and project_id=?',messageId,id);need(m,'That message is gone.',404);
+    const t=one('select * from transport where project_id=?',id)!;
+    need(m!.visitor_id===v.id||a.role==='owner'||(t.conductor_id===v.id&&t.lease_until>Date.now()),'Only the author, the owner or the host can remove a message.',403);
+    run('update project_chat set deleted_at=?,deleted_by=? where id=?',Date.now(),v.id,m!.id);
+    announce(after,v,id,'chat.deleted',String(m!.id),null);return {ok:true};
+  });
+}
+
+// --- saved sounds ("My sounds") ------------------------------------------------
+export function mySounds(v:Visitor){return rows('select id,name,role,source,attribution_json,created_at as createdAt from user_sound where visitor_id=? order by created_at desc limit 100',v.id).map(s=>({id:s.id,name:s.name,role:roleOf(s.role),source:s.source,attribution:JSON.parse(s.attribution_json),createdAt:s.createdAt}));}
+export function saveSound(v:Visitor,input:Row){
+  const name=text(input.name,40,'the sound a name'),source=code(input.source);parseSource(source);
+  limit(`sound:${v.id}`,10,0.2);persist(v);
+  need(Number(one('select count(*) as n from user_sound where visitor_id=?',v.id)!.n)<100,'You can keep 100 sounds. Delete one first.',409);
+  const from=typeof input.from==='object'&&input.from?{part:typeof input.from.part==='string'?input.from.part.slice(0,40):undefined,preset:typeof input.from.preset==='string'?input.from.preset.slice(0,40):undefined,addedBy:typeof input.from.addedBy==='string'?input.from.addedBy.slice(0,40):undefined}:{};
+  const sid=randomUUID();run('insert into user_sound values(?,?,?,?,?,?,?)',sid,v.id,name,(ROLES as readonly string[]).includes(input.role)?input.role:null,source,JSON.stringify({savedBy:handleOf(v.id),...from}),Date.now());
+  return {id:sid};
+}
+export function deleteSound(v:Visitor,soundId:unknown){need(run('delete from user_sound where id=? and visitor_id=?',soundId,v.id).changes,'That sound is not yours.',404);return {ok:true};}
+
+// --- export and import (members only) ---------------------------------------------
+export function exportProject(v:Visitor,id:string){
+  const s=roomSnapshot(v,id);
+  return {format:'ensemble',schemaVersion:2,title:s.title,settings:{bpm:s.settings.bpm,sceneNames:s.settings.sceneNames,arrangement:s.settings.arrangement},
+    parts:s.parts.filter(p=>!p.archivedAt&&!p.guest).map(p=>({id:p.id,name:p.name,role:p.role==='custom'?null:p.role,presetId:p.presetId,presetVersion:p.presetVersion,clips:Object.fromEntries(Object.entries(p.clips).map(([k,c])=>[k,{document:c!.document,source:c!.source,provenance:c!.provenance}]))})),
+    plan:(()=>{const p=s.plans.at(-1)!;return {mix:p.mix,manual:p.manual,sceneAssignments:p.sceneAssignments,scene:p.scene};})()};
+}
 export function importProject(v:Visitor,input:Row){
-  need(input.format==='stream'&&input.schemaVersion===1&&Array.isArray(input.tracks)&&input.tracks.length<=12,'Invalid Stream project.');
-  const title=text(input.title,60),arr=arrangement(input.settings?.arrangement);need(Number.isInteger(input.settings?.bpm)&&input.settings.bpm>=60&&input.settings.bpm<=180,'Invalid tempo.');
-  db.exec('begin immediate');
-  try{
-    const id=newProject(v,title),mapping:Record<string,string>={};
-    // Imports may contain >2 tracks; imported archive overflow stays recoverable.
-    input.tracks.forEach((raw:Row,i:number)=>{
-      const tr=newTrack(v,id,text(raw.name,40),'drums',i>=2);mapping[raw.id??String(i)]=tr;
-      need(raw.clips&&Object.keys(raw.clips).length<=4,'Too many clip slots.');
-      for(const [s,c]of Object.entries(raw.clips) as [string,Row][]){slot(s);const doc=validateDocument(c.document);if(c.source!=null)need(JSON.stringify(parseCode(text(c.source,8192)))===JSON.stringify(doc),'Imported code disagrees with its blocks.');
-        const existing=one('select id from clip where track_id=? and slot=?',tr,s);
-        if(existing)run('update clip_revision set document_json=?,source_text=?,provenance_json=? where clip_id=? and revision=1',JSON.stringify(doc),c.source??null,JSON.stringify({imported:true}),existing.id);
-        else newClip(v,tr,s as Slot,doc,c.source??null,{imported:true});
+  limit(`create:${v.id}`,10,0.2,'You are starting mixes very quickly. Try again shortly.');
+  const stream=input.format==='stream'&&input.schemaVersion===1,ensemble=input.format==='ensemble'&&input.schemaVersion===2;
+  need(stream||ensemble,'This is not an Ensemble or Stream project file.');
+  const list=(stream?input.tracks:input.parts) as Row[];need(Array.isArray(list)&&list.length<=24,'A project file holds at most 24 parts.');
+  const title=text(input.title,60,'the mix a name');need(Number.isInteger(input.settings?.bpm)&&input.settings.bpm>=60&&input.settings.bpm<=180,'Invalid tempo.');
+  const arr=arrangement(input.settings?.arrangement);
+  return tx(after=>{
+    const id=newProject(v,title),mapping:Record<string,string>={},now=Date.now();
+    list.forEach((raw,i)=>{
+      need(raw&&typeof raw==='object'&&raw.clips&&typeof raw.clips==='object'&&Object.keys(raw.clips).length<=4,'Each part has at most four clip slots.');
+      const trackId=randomUUID();mapping[String(raw.id??i)]=trackId;
+      // Parts beyond the twelve-part limit arrive removed, not dropped.
+      run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version) values(?,?,?,?,?,1,?,?,?,?)',trackId,id,v.id,text(raw.name,40,'each part a name'),i,i>=ROOM_LIMITS.parts?now:null,(ROLES as readonly string[]).includes(raw.role)?raw.role:null,typeof raw.presetId==='string'?raw.presetId:null,Number.isInteger(raw.presetVersion)?raw.presetVersion:null);
+      for(const [s,c] of Object.entries(raw.clips) as [string,Row][]){
+        slot(s);let doc:AnyDocument,source:string|null=c.source??null;
+        if(c.document?.schemaVersion===2){need(typeof source==='string','Expression parts carry their source.');doc=parseSource(source!).document;}
+        else{doc=validateDocument(c.document);if(source!=null)need(JSON.stringify(parseCode(text(source,8192,'the code')))===JSON.stringify(doc),'Imported code disagrees with its pattern.');}
+        const clipId=randomUUID();run('insert into clip values(?,?,?,1)',clipId,trackId,s);
+        run('insert into clip_revision values(?,1,?,?,?,?,?,?)',clipId,doc.schemaVersion,JSON.stringify(doc),source,JSON.stringify({imported:true}),v.id,now);
       }
+      if(!Object.keys(raw.clips).length){const clipId=randomUUID();run('insert into clip values(?,?,?,1)',clipId,trackId,'A');run('insert into clip_revision values(?,1,1,?,null,?,?,?)',clipId,JSON.stringify(emptyClip()),JSON.stringify({imported:true}),v.id,now);}
+      for(const s of SLOTS)run('insert into scene_assignment values(?,?,?,?)',id,s,trackId,'A');
     });
-    const names=Object.fromEntries(SLOTS.map(s=>[s,text(input.settings.sceneNames?.[s]??s,30)]));run('update project_settings set bpm=?,scene_names_json=?,arrangement_json=? where project_id=?',input.settings.bpm,JSON.stringify(names),JSON.stringify(arr),id);
-    const p=blankPlan();syncCatalog(id,p);p.planRevision=1;
+    const names=Object.fromEntries(SLOTS.map(s=>[s,text(input.settings.sceneNames?.[s]??s,30,'each scene a name')]));
+    run('update project_settings set bpm=?,scene_names_json=?,arrangement_json=? where project_id=?',input.settings.bpm,JSON.stringify(names),JSON.stringify(arr),id);
+    const p=blankPlan();
     for(const [oldId,newId] of Object.entries(mapping)){
-      for(const scene of SLOTS){
-        const assignment=input.plan?.sceneAssignments?.[scene]?.[oldId];
-        if(assignment!==undefined){const chosen=assignment===null?null:slot(assignment);run('update scene_assignment set clip_slot=? where project_id=? and scene=? and track_id=?',chosen,id,scene,newId);p.sceneAssignments[scene][newId]=chosen;}
-      }
+      for(const scene of SLOTS){const assignment=input.plan?.sceneAssignments?.[scene]?.[oldId];if(assignment!==undefined)run('update scene_assignment set clip_slot=? where project_id=? and scene=? and track_id=?',assignment===null?null:slot(assignment),id,scene,newId);}
       const mix=input.plan?.mix?.[oldId];
       if(mix!==undefined){need(typeof mix.gain==='number'&&Number.isFinite(mix.gain)&&mix.gain>=0&&mix.gain<=1&&typeof mix.mute==='boolean','Invalid imported mixer.');p.mix[newId]={gain:mix.gain,mute:mix.mute};}
       if(input.plan?.manual&&Object.hasOwn(input.plan.manual,oldId))p.manual[newId]=input.plan.manual[oldId]===null?null:slot(input.plan.manual[oldId]);
     }
     if(input.plan?.scene!==undefined)p.scene=slot(input.plan.scene);
-    savePlan(id,p);
-    const eid=event(id,v.id,'project.imported',id,null);db.exec('commit');emit(v,id,eid,'project.imported',id,null);return {id};
-  }catch(e){db.exec('rollback');throw e;}
+    syncCatalog(id,p);p.planRevision=1;savePlan(id,p);
+    announce(after,v,id,'project.imported',id,null);return {id};
+  });
 }
+
+// --- boot: legacy sketches, then restart handling ----------------------------------
 // Import each old trace once, preserving unsupported code verbatim as an archive.
 function migrateLegacy(){
   const old=rows('select t.*,v.handle from trace t join visitor v on v.id=t.visitor_id where t.id not in(select trace_id from legacy_import) order by t.id');
   if(!old.length)return;
   db.exec('begin immediate');try{
     const first=old[0],v:Visitor={id:first.visitor_id,handle:first.handle,fresh:false};
-    let id=one("select id from project where title='Earlier sketches' limit 1")?.id;if(!id)id=newProject(v,'Earlier sketches');
+    let id=one("select id from project where title='Earlier sketches' limit 1")?.id;if(!id)id=newProject(v,'Earlier sketches','private',false);
     for(const row of old){
-      try{const doc=parseCode(row.body),owner={id:row.visitor_id,handle:row.handle,fresh:false};
-        const count=one('select count(*) as n from track where project_id=? and archived_at is null',id)!.n, own=one('select count(*) as n from track where project_id=? and owner_id=? and archived_at is null',id,owner.id)!.n;
-        const tr=newTrack(owner,id,`${row.handle} sketch`.slice(0,40),'drums',count>=12||own>=2);const c=one("select id from clip where track_id=? and slot='A'",tr)!;
-        run('update clip_revision set document_json=?,source_text=? where clip_id=? and revision=1',JSON.stringify(doc),row.body,c.id);
-        run('insert into legacy_import values(?,?,?,null)',row.id,c.id,row.body);
+      try{const doc=parseCode(row.body),count=Number(one('select count(*) as n from track where project_id=? and archived_at is null',id)!.n);
+        const trackId=randomUUID(),position=Number(one('select coalesce(max(position),-1)+1 as p from track where project_id=?',id)!.p);
+        run('insert into track(id,project_id,owner_id,name,position,revision,archived_at) values(?,?,?,?,?,1,?)',trackId,id,row.visitor_id,`${row.handle} sketch`.slice(0,40),position,count>=ROOM_LIMITS.parts?Date.now():null);
+        const clipId=randomUUID();run('insert into clip values(?,?,?,1)',clipId,trackId,'A');
+        run('insert into clip_revision values(?,1,1,?,?,?,?,?)',clipId,JSON.stringify(doc),row.body,'{}',row.visitor_id,Date.now());
+        for(const s of SLOTS)run('insert into scene_assignment values(?,?,?,?)',id,s,trackId,'A');
+        run("insert or ignore into project_member values(?,?,'member',?,null)",id,row.visitor_id,Date.now());
+        run('insert into legacy_import values(?,?,?,null)',row.id,clipId,row.body);
       }catch(e){run('insert into legacy_import values(?,null,?,?)',row.id,row.body,e instanceof Error?e.message:'Unsupported sketch');}
     }
     const p=blankPlan();syncCatalog(id,p);p.planRevision=(plansFor(id,0).at(-1)?.planRevision??0)+1;savePlan(id,p);db.exec('commit');
   }catch(e){db.exec('rollback');throw e;}
 }
 migrateLegacy();
-// Restarts stop playback and release leases, while retaining saved music.
-// The crash instant is unknown, so the last durable write stands in for it:
-// a plan already sounding by then is kept, and anything still queued after it
-// is cancelled rather than silently applied on the next start.
+// A restart ends live performances (interrupted, guest parts removed), stops
+// every transport, releases hosts and cancels queued plan changes. Saved music,
+// members, friends, invitations, chat and revisions stay. The crash instant is
+// unknown, so the last durable write stands in for it: a plan already sounding
+// by then is kept, and anything still queued after it is cancelled.
+for(const perf of rows("select * from performance where status='live'")){
+  tx(after=>{
+    run("update performance set status='ended',ended_at=?,end_reason='interrupted' where id=?",Date.now(),perf.id);
+    run('update track set archived_at=? where guest_performance_id=? and archived_at is null',Date.now(),perf.id);
+    announce(after,null,perf.project_id,'performance.interrupted',perf.id,null,{log:{performance:perf.id.slice(0,8)}});
+  });
+}
 for(const t of rows("select * from transport where status='playing' or conductor_id is not null")){
   db.exec('begin immediate');try{
     const plans=plansFor(t.project_id,t.generation),bpm=one('select bpm from project_settings where project_id=?',t.project_id)!.bpm;
     const lastWrite=Math.max(Number(one('select max(created_at) as at from performance_plan where project_id=? and generation=?',t.project_id,t.generation)?.at??0),Number(one('select max(created_at) as at from event where project_id=?',t.project_id)?.at??0));
-    const p=planAtRestart(plans,t.status==='playing'?t.epoch_ms:null,bpm,lastWrite);p.generation=t.generation+1;p.effectiveCycle=0;p.planRevision=0;p.arrangement=null;
-    run("update transport set status='stopped',epoch_ms=null,conductor_id=null,lease_until=0,generation=generation+1,revision=revision+1 where project_id=?",t.project_id);savePlan(t.project_id,p);event(t.project_id,null,'transport.reset',null,null);db.exec('commit');logAction(null,'transport.reset',{project:t.project_id.slice(0,8)});
+    const p=planAtRestart(plans,t.status==='playing'?t.epoch_ms:null,bpm,lastWrite);p.generation=t.generation+1;p.effectiveCycle=0;p.planRevision=0;p.arrangement=null;syncCatalog(t.project_id,p);
+    run("update transport set status='stopped',epoch_ms=null,conductor_id=null,lease_until=0,generation=generation+1,revision=revision+1 where project_id=?",t.project_id);savePlan(t.project_id,p);
+    run('delete from performance_plan where project_id=? and generation<?',t.project_id,t.generation+1);
+    addEvent(`member:${t.project_id}`,null,'transport.reset',{},t.project_id,null);db.exec('commit');logAction(null,'transport.reset',{project:t.project_id.slice(0,8)});
   }catch(e){db.exec('rollback');throw e;}
 }
-export function listProjects(){return rows('select id,title from project order by updated_at desc limit 24');}
 export function legacyArchive(){return rows('select l.trace_id,l.archived_source,l.reason,v.handle from legacy_import l join trace t on t.id=l.trace_id join visitor v on v.id=t.visitor_id where new_clip_id is null');}
+export const leaseCount=()=>leases.size;
