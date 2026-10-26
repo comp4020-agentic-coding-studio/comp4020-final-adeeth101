@@ -1,112 +1,170 @@
-# Stream architecture decisions
+# Ensemble architecture decisions
 
-## A validated tree for three editing views
+## From Stream to Ensemble
 
-The earlier sequencer recognised one `s(...)` shape. Stream uses a versioned
-tree with sound/note sequences, parallel patterns and ordered transforms.
-Blockly and instrument grids edit this tree; the code editor parses an Acorn
-AST into it. Unknown calls fail closed. Playback constructs Strudel patterns
-through library calls instead of evaluating submitted source.
+Stream offered three equal ways in (blocks, an instrument grid, code), split
+composing from performing, and gave each person their own tracks. Ensemble
+starts from Incredibox's move instead: give a sound to a performer. Presets
+are the way in; Shape and Code open on a part for precision. One room holds
+composing and playing; performing for others is a separate, deliberate step.
 
-This sacrifices arbitrary JavaScript and complex mini-notation inside the
-shared studio. The benefit is that collaborators hear the same supported
-contributions and the three views can preserve musical meaning. Unsupported
-text remains a recoverable draft and can be exported to the full Strudel REPL.
+What was kept: Node's HTTP server and SQLite on one small machine, SSE,
+idempotent commands with revision checks, durable performance plans on a
+shared clock, browser-side audio, local drafts, the signed visitor cookie and
+the starter invariants. What was removed: the Compose/Perform split, the
+two-tracks-per-person cap, track ownership as the edit rule, the conductor
+podium as a separate claim, and the Blockly editor.
 
-## Shared musical time and a bounded output
+## A source-first expression model beside the old tree
 
-Strudel 1.2.6's `Cyclist.start()` resets cycle state. Rather than depend on
-mutable internal scheduler fields for late joins, `StudioAudio` queries real
-Strudel patterns over global cycle arcs, with a 160 ms lookahead and native
-WebAudio absolute scheduling. One cycle is four beats; BPM / 240 is cycles
-per second. Plans change on a future bar and the current query clock continues.
+Stream required every code expression to round-trip through its grid tree, so
+the code view could hold almost nothing the grid could not. The candidate
+presets need chords, `<>` alternation, `*8`, bass below MIDI 48, pan and
+release; the grid can represent none of them.
 
-The custom output synthesises four drum voices and four oscillator waveforms.
-It implements the supported gain, filter and reverb controls plus a master
-compressor. This avoids external sample downloads and gives predictable
-assets, at the cost of sounding different from Strudel's default sample banks.
-It supports our bounded vocabulary, not Strudel's entire audio feature set.
+Ensemble adds a version 2 document whose truth is the source text. Acorn
+parses it; a closed grammar turns the AST into a small expression tree; the
+mini-notation strings are parsed by our own parser into the same tree. The
+browser builds Strudel patterns from that tree with named library calls
+(`s`, `note`, `stack`, `sequence`, `timeCat`, `pure`, `silence` and the
+listed controls). Submitted text is never evaluated and the server never
+imports Strudel: a direct Node import of the installed Strudel failed on a
+`@kabelsalat/web` export, and the server has no need of patterns, only of the
+grammar and its bounds.
 
-Clock calibration uses the lowest-RTT of five server samples. Scheduled
-timestamp agreement is testable; actual output latency depends on devices.
-Do not describe the ensemble as sample-accurate network audio.
+Our mini-notation parser was preferred to Strudel's own (`krill`) because it
+lets every construct be bounded before expansion: onsets per bar and the
+repeat period are computed exactly on the tree, so `s("bd*16").fast(8)` or a
+seven-by-nine-by-eleven alternation is refused without building anything.
+`spec/expr.test.ts` holds the parser to Strudel's: for each supported
+construct the events match `mini()` over 24 cycles. The cost is coverage.
+Euclidean rhythms, `?` and degradation, ranges, `|` choice, `.` grouping,
+variables, functions and the rest of Strudel are refused with a message.
 
-## Ownership, conducting and automation
+Version 1 trees keep playing unchanged. There is no conversion in either
+direction, so nothing is ever approximated to fit a view.
 
-People edit their own clips and control their own track. A leased conductor
-role controls ensemble transport, scenes and arrangements. Owners can switch
-their track to manual control and later follow scenes again. This avoids
-requiring concurrent text editing or giving the conductor ownership of clips.
+## Shape that keeps the meaning
 
-Rhythm and melody bots use a versioned seeded algorithm. They suggest a draft;
-acceptance and publication are separate actions. They do not autonomously
-overwrite saved music. The arranger supplies automatic performance sequencing.
+Shape edits code, so it can only offer what it can say exactly. A control on
+the outermost chain applies to the whole part, so its number is replaced in
+place and the rest of the text, comments included, is untouched. A control
+absent everywhere is appended. A control written inside one layer of a stack
+cannot be changed from outside without overriding that layer, because in
+Strudel an outer `.gain()` sets the value rather than scaling it, so Shape
+declines and points to Code.
 
-## Persistence and conflict recovery
+Volume is therefore not a code edit: it is the part's level in the shared mix
+(`part.mix`), which multiplies whatever the code says. That keeps a preset's
+internal balance (a kick at full, hats at 0.16) when someone turns it down.
 
-SQLite stores projects, clip revisions, scene assignments and performance
-plans on the existing mounted volume. Commands check identity, revisions and
-capacity within a transaction. An idempotency receipt prevents duplicate
-mutation when a committed command is retried. Event broadcast happens after
-commit. SSE sends small invalidations; clients reload a consistent snapshot.
+## Visibility, roles and scoped events
 
-Drafts are separate IndexedDB records. The saved project survives a restart;
-transport and conductor leases reset so that returning never unexpectedly
-starts audio. Legacy source is retained and imported only when understood.
+Every read starts in `src/access.ts`. A project is read either as a member
+(the room snapshot) or as a permitted viewer (the saved mix and public
+credits, nothing else); a performance as host, member, guest performer or
+listener. Anything else is the same 404 a missing id gets.
+
+Events carry a scope, and a stream subscribes to one scope, so replay and
+fan-out share the filter instead of each re-deciding what a reader may see.
+A member event says only that something changed; pages fetch a snapshot that
+is checked again. When membership, visibility or a performance role changes,
+every open stream re-runs its access check and closed ones get `revoked`. A
+stream is removed from the hub when it is ended, not when its socket closes,
+because a broadcast in between once wrote after end and crashed the process
+(found by `spec/access.test.ts`).
+
+The sketchpad's old global stream read the whole event table, which became a
+leak once project events shared it (diagnosed against the Stream release; see
+[verification](verification.md)). It now reads only its own kinds.
+
+## Editing together without a shared buffer
+
+Any member may edit any part. Three things keep that safe. Credit is
+structural: the part records who added it and each immutable revision who
+made it. A 30 s edit lease, renewed while a part is open, tells others who is
+working on it; it is enforced on the server, belongs to the person (so their
+tabs share it), and lapses on its own. Every edit carries the revision it was
+based on, so a stale save is refused and the editor keeps the draft with
+three choices: keep my draft, load current, save as a new part. Merging two
+edits automatically was rejected for the same reason as in Stream: musical
+edits are not line edits.
+
+## Hosting rather than conducting
+
+Stream's conductor had to be claimed on a separate page. Ensemble makes the
+creator host at once, so a first mix needs no podium, and the host lease is
+renewed by the room's heartbeat. If the host leaves while the mix plays, the
+server stops it rather than leaving a room playing to nobody, and any member
+can take over. Hosting is a playback role; ownership (membership,
+visibility) stays separate.
+
+## Performances on the project's own clock
+
+A performance is a row pointing at a project, not a second transport: the
+audience schedules the same plans against the same epoch, so going live,
+guests joining and members' edits never reset phase. The audience snapshot is
+built separately from the plan and credits; it never returns the project
+snapshot. Guest parts are ordinary parts marked with their performance, so
+they share the twelve-part limit and leave the plan at the next boundary when
+the session ends; Keep in project makes a credited copy.
+
+## Identity: guest first, recoverable
+
+The signed cookie remains the fast way in. Keep my profile adds a 125-bit
+recovery code, shown once, stored as a SHA-256 hash and guess-limited per
+device and per address. Using it issues a new signed cookie for the same
+visitor id. No email or OAuth: the code is the account, and the page says so.
+
+Friend codes are random six-character codes, not derived from the private id.
+Friendship shows a generic online status and allows direct invitations; it
+never grants access.
+
+## Invitations and bearer links
+
+Invitation tokens are 192-bit, stored only as hashes, carried in the URL
+fragment (which browsers do not send to servers or in referrers), exchanged by
+POST and then cleared from the address bar. The use count is incremented
+with a conditional update in the same transaction as the membership change,
+so two people racing for a one-use link cannot both get in
+(`spec/social.test.ts` races six).
+
+Unlisted view and listen links are derived from the server secret, the
+resource and its link version, so the owner can copy them again without the
+raw token being stored, and bumping the version revokes every earlier link and
+the grants made from them.
 
 ## Restart semantics
 
 A restart cannot know the instant the old process died, so it uses the last
-durable write for the piece (the newest plan or event) as a stand-in. The plan
-sounding at that moment is kept, with its arrangement frozen on the scene it
-had reached; anything queued for a later bar is cancelled. The alternative,
-keeping the newest plan, would silently apply a scene launch or mix change
-that nobody heard. A second restart finds nothing playing and records nothing.
+durable write for the project as a stand-in: the plan sounding then is kept,
+anything queued later is cancelled. Live performances end as `interrupted`
+and their guest parts leave. Edit leases, presence and online status are in
+memory and simply vanish. Nothing auto-resumes.
 
-## Conflicts are the owner's choice
+## Sound and headroom
 
-Two tabs, or a tab and a returning device, can edit the same clip. Applying a
-draft based on an older revision is refused by the server and blocked in the
-editor, which keeps the draft and offers three explicit outcomes: keep my draft
-(rebase it on the newer revision and apply deliberately), load the saved
-version (asks first; Undo restores the draft) or save as another clip (move
-the draft to an empty slot). Merging two trees automatically was rejected:
-musical edits are not line edits, and a silent merge could produce something
-neither person wrote.
+The output implements exactly the grammar's controls. A fixed master gain
+feeds a limiter and a ceiling; device volume scales before them, so no
+setting can bypass the limiter. The master trim was set by offline
+measurement of every preset and a twelve-part mix (see
+[verification](verification.md)); it is a calibration, not a listening
+verdict. An unknown sound name is skipped rather than played as a default
+voice.
 
-## Staying honest about the connection
+## Browser connection limits
 
-The live stream is the normal path. When the server refuses another stream
-(two per person per piece, 64 in total), the page says live updates are busy,
-polls the snapshot every second and still publishes. The server's heartbeat is
-a named event every 5 s rather than an SSE comment, because browsers hide
-comments; eight silent seconds mean a dead connection. While no snapshot has
-answered for three seconds, Apply is disabled and the draft stays local. Two
-seconds after the stream drops, ensemble sound stops unless polling is still
-answering.
-
-## A measured limit on density
-
-`scripts/load-proof.mjs` publishes twelve tracks and drives the stage in
-Chromium. Twelve clips at the original legal maximum (128 cells at 4× speed)
-asked for about 3,070 events per second. Desktop Chromium voiced them, but
-under 4× CPU throttling the scheduler voiced about 11% and dropped the rest
-without telling anyone. Clips are now limited to 128 steps per bar (each
-sequence's steps times its combined speed), which caps the worst legal piece
-at 768 events/s at 120 BPM and 1,152 at 180. Throttled 4×, a browser still
-manages only about 370 events/s, so the stage reports skipped sounds rather
-than hiding them. A real phone has not been measured; these are bounds from a
-desktop machine and an emulated slowdown.
+Browsers allow six HTTP/1.1 connections per site and each live stream holds
+one. Room and audience pages therefore poll notifications rather than opening
+a second stream; one open mix costs one connection. Fly's proxy speaks
+HTTP/2, which multiplexes streams, so this matters most locally.
 
 ## Build and deployment
 
-The Node HTTP/SQLite server is retained. Vite builds browser modules, with
-Blockly and audio loaded on demand. The performance page never needs Blockly.
-The Docker build compiles client assets in one stage and installs production
-dependencies in another, so the running image carries the bundle and Acorn
-only. Blockly and Strudel are devDependencies because Vite bundles them.
-jsdom stays at 29 because Blockly 13.3 declares a peer range below 30. The
-original machine/volume constraints and shipped invariant tests remain in
-place. CI runs the spec and the production browser flows against the same
-container it deploys. Shutdown closes live streams so the process exits
-promptly on Fly's stop signal.
+Vite builds the browser modules; each view, the audio engine and the preset
+catalogue load on demand. The Docker build compiles client assets in one
+stage and installs production dependencies in another, so the image carries
+the bundle and Acorn only. The machine and volume constraints and the shipped
+invariant tests are unchanged. CI runs the spec and the production browser
+flows against the same container it deploys. Shutdown closes live streams so
+the process exits promptly on Fly's stop signal.

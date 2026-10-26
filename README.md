@@ -1,9 +1,8 @@
-# Stream · a shared Strudel studio
+# Ensemble · make a mix with friends
 
-A multi-user [Strudel](https://strudel.cc/) studio. Create a piece, share its
-link, and each person adds up to two tracks of drums or melody, written as
-connected blocks, an instrument grid or code over one shared musical model.
-Perform launches scenes, mixes and conducts.
+A collaborative, editable take on [Incredibox](https://www.incredibox.com/)
+built on [Strudel](https://strudel.cc/). Start a mix, give sounds to a band of
+performers, invite friends to change them with you, and go live.
 
 ## What good means for this app
 
@@ -31,10 +30,11 @@ I judge the app on three questions:
 ## How good is checked
 
 **Enforced** by `spec/` against the running app: two browsers are two people;
-only a track's owner can change it, and conducting never grants ownership;
-submitted code is parsed, never executed; a stale edit is refused and the draft
-kept; pieces survive restarts; every change and every refusal is logged
-server-side with who made it; core controls work by keyboard at phone width.
+only members can change a mix, each part keeps who added and who edited it,
+and a private mix is invisible to anyone else; code is parsed, never executed;
+a stale edit is refused and the draft kept; mixes survive restarts; an audience
+listens but never edits; every change and refusal is logged with who made it;
+controls work by keyboard at phone size.
 
 **Judged**, not tested: whether a newcomer actually gets sound in a minute,
 whether the views feel like one instrument, and whether two devices sound in
@@ -46,10 +46,10 @@ how and when.
 
 - **Accounts.** A signed cookie and a generated handle are enough to tell people
   apart in one room. Passwords would only slow the first minute.
-- **One shared text buffer.** Each person owns their tracks instead, so
-  simultaneous edits don't collide inside someone else's line.
-- **Running submitted code.** Code is parsed into a bounded tree; anything
-  outside it stays a local draft.
+- **One shared text buffer.** Anyone may change any part, but each is edited
+  on its own under a lease and a revision check, so two people never collide.
+- **Running submitted code.** Code is parsed into a bounded expression; the
+  rest stays a draft.
 - **Server-side or sample-accurate network audio.** Browsers schedule against a
   shared clock; I don't claim more than that.
 

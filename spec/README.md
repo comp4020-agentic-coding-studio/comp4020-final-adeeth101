@@ -31,9 +31,29 @@ At a crit, a green `check` job is half the shipped mark, but it's never the
 judgement of the work: your tutor checks what you deployed against the published
 spec.
 
+## Ensemble's checks
+
+Against the running app (`APP_URL`), unless noted:
+
+| File | Protects |
+| --- | --- |
+| `expr.test.ts` | The expression grammar: what it accepts and refuses, exact bounds before expansion, agreement with Strudel 1.2.6's `mini()`, all 24 presets |
+| `studio.test.ts` | Rooms: presets, the twelve-part limit, any member editing any part with stable credit, stale revisions, leases, invalid code never saved, verbatim source, idempotency, host-only transport, chat, SSE, export/import |
+| `access.test.ts` | The permission matrix over HTML, API, SSE, export, chat, discovery and the legacy routes; public and unlisted reading; streams revoked on removal or going private; roles; eight active editors |
+| `social.test.ts` | Friends, blocks, rate limits, generic online status, invitation lifecycle, a six-way race for a one-use link |
+| `performances.test.ts` | Going live on the project clock, audience snapshot, listen links, the 32-listener cap, guest performers, moderation, ending |
+| `legacy-stream.test.ts` | The diagnosed leak: project events never reach the sketchpad stream |
+| `durable.test.ts` | Own server: a restart keeps music, members, chat and identity and ends live sessions; recovery codes; invitation expiry; tokens never logged or stored raw |
+| `migration.test.ts` | Own server on `fixtures/stream-v1.db`: every Stream record survives, roles follow authorship, a verified backup restores |
+| `restart.test.ts`, `logging.test.ts` | Own server: queued changes cancelled on restart; who did what in the log |
+| `music.test.ts`, `pattern.test.ts` | Version 1 trees and the earlier sketchpad's pattern grammar |
+| `browser/*.pw.ts` | The whole journey across three browsers at 1920×1080 and 390×844, conflicts, keyboard-only use with axe, refused audio, polling fallback, losing the server |
+
+`helpers.ts` holds the shared HTTP helpers and is not a test.
+
 ## `contract.test.ts`
 
-Protects the promises in `docs/contract.md` against the running app:
+Protects the earlier sketchpad's promises against the running app:
 
 - two cookie jars are two visitors, a visitor keeps their id across requests,
   and a tampered signature is rejected rather than honoured

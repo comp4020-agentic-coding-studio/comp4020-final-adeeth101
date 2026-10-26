@@ -11,13 +11,15 @@ What the agent needs to carry from any of it is your call.
 
 ## Product invariants
 
-- Blocks, instruments and supported code share the validated model in `shared/music.ts`.
-- Never execute submitted source text. Parse the closed grammar; preserve unsupported drafts.
-- Track ownership and revision checks are enforced on the server. Conducting never grants clip ownership.
-- Shared performance follows durable plans on a common clock; editing must not reset musical phase.
-- A database mutation and its event commit together. Broadcast only after commit.
-- Every committed change and every refused command logs who did what, server-side, via `logAction` in `src/events.ts`. Never log clip source, trace text or cookies.
-- Preserve musical data and legacy source during migrations. A restart stops transport, not saved composition.
-- Core controls must work by keyboard and at both marking viewports; provide the form alternative to dragging blocks.
-- Run `pnpm check` and `pnpm test:browser` against production assets. Check evidence before shipping.
-- Read `docs/contract.md` for the product contract and `docs/architecture.md` for implementation trade-offs.
+- Ensemble is a collaborative, editable Incredibox: sounds given to a band of performers. Not a dashboard; presets first, Shape and Code on a part.
+- Never execute submitted source text. Parse the closed grammar in `shared/expr.ts`; bound it before expanding; keep source verbatim; keep refused drafts on the device.
+- Version 1 trees (`shared/music.ts`) keep playing. Never convert between versions or approximate a part to fit a control; disable the control with a reason.
+- Check access in `src/access.ts` before reading anything. Visibility controls reading, roles control writing, friendship grants nothing. Private things answer like missing ones and are never cached.
+- Membership, leases, revisions and capacity are enforced on the server. Hosting never grants ownership; a performance role never grants membership.
+- Every event has a scope; a stream reads one scope. A mutation and its events commit together; broadcast only after commit.
+- Shared performance follows durable plans on the project's clock; editing or going live must not reset musical phase.
+- Every committed change and every refused command logs who did what via `logAction`. Never log code, chat text, tokens, recovery codes or cookies.
+- Migrations are append-only, transactional and backed up. Preserve musical data, authorship and legacy source. A restart stops sound and live sessions, not saved work.
+- Core controls work by keyboard and at both marking viewports; every drag has a click alternative; Escape closes and focus returns.
+- Run `pnpm check` and `pnpm test:browser` against production assets on an isolated database. Check evidence before shipping.
+- Read `docs/ensemble-contract.md` for the product direction, `docs/contract.md` for what is built and `docs/architecture.md` for trade-offs.
