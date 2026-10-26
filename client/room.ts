@@ -136,17 +136,18 @@ export async function mountRoom(host:HTMLElement,id:string){
   }
 
   // --- sound tray ---------------------------------------------------------------------
-  // Rebuilding the tray replaces its buttons, which would drop the focus of
-  // someone working by keyboard, and with it the Enter they were about to
-  // press. Whatever was focused is restored by the action it names.
-  function renderTray(){
-    el.tray.hidden=!trayOpen;if(!trayOpen)return;
-    const focused=document.activeElement&&el.tray.contains(document.activeElement)
-      ?(document.activeElement as HTMLElement).dataset:null;
-    const restore=()=>{if(!focused)return;
-      const sel=focused.sound?`[data-act="${focused.act}"][data-sound="${CSS.escape(focused.sound)}"]`
-        :focused.act?`[data-act="${focused.act}"]${focused.role?`[data-role="${focused.role}"]`:''}`:null;
-      if(sel)$<HTMLElement>(sel,el.tray)?.focus({preventScroll:true});};
+  // Rebuilding the tray replaces its buttons: a keyboard user loses focus, and
+  // a click in flight lands on an element no longer in the document, so the
+  // press does nothing. The tray is only rebuilt when something it shows has
+  // actually changed, which a snapshot of those inputs decides.
+  let trayKey='';
+  function renderTray(force=false){
+    el.tray.hidden=!trayOpen;if(!trayOpen){trayKey='';return;}
+    const key=JSON.stringify([pack,filter,traySource,swapFor,previewing,mySounds.map(s=>s.id),
+      !playing()&&(isHost()||!state.transport.hostId)&&online(),
+      state.editors.youCanEdit&&online(),active().length>=12,state.settings.bpm]);
+    if(!force&&key===trayKey)return;
+    trayKey=key;
     const p=PACKS.find(x=>x.id===pack)!;
     const list:(Preset|{id:string;name:string;role:Role|'custom';source:string;mine:true})[]=traySource==='mine'?mySounds.map(s=>({...s,mine:true as const})):p.presets.filter(x=>filter==='all'||x.role===filter);
     const verb=!playing()&&(isHost()||!state.transport.hostId)&&online()?'Add and play':'Add';
@@ -166,7 +167,6 @@ export async function mountRoom(host:HTMLElement,id:string){
       <span class="sound-actions"><button class="ghost small" data-act="preview" data-sound="${esc(x.id)}" data-mine="${'mine' in x?1:0}" aria-pressed="${previewing===x.id}" aria-label="${previewing===x.id?'Stop preview of':'Preview'} ${esc(x.name)}">${previewing===x.id?'■':'▶'}<span class="sr-only"> preview</span></button>
       <button class="primary small" data-act="${target?'swap':'add'}" data-sound="${esc(x.id)}" data-mine="${'mine' in x?1:0}" ${state.editors.youCanEdit&&online()&&(target||active().length<12)?'':'disabled'} aria-label="${target?'Swap to':verb} ${esc(x.name)}">${target?'Swap':verb}</button></span>
     </li>`).join(''):`<li class="empty">${traySource==='mine'?'Save a part from its Code tab to keep it here.':'No sounds of that type in this pack.'}</li>`}</ul>`;
-    restore();
   }
 
   // --- drawers ---------------------------------------------------------------------------
@@ -422,7 +422,7 @@ export async function mountRoom(host:HTMLElement,id:string){
         say(soundOk?'Playing for everyone.':'Playing for everyone — sound is off on this device.');return;
       }
       case 'sound':{if(soundOn()&&wantSound){wantSound=false;current()?.stop();previewing=null;say('Sound off on this device. The shared mix keeps playing for others.');renderHead();renderTray();}else{await turnSoundOn();}return;}
-      case 'tray':trayOpen=!trayOpen;swapFor=null;if(trayOpen&&!mySounds.length)void request('/api/sounds').then(x=>{mySounds=x.sounds;}).catch(()=>{});renderTray();renderStage();if(trayOpen){openLayer(el.tray,()=>{trayOpen=false;swapFor=null;renderTray();renderStage();closeLayer(el.tray);});}return;
+      case 'tray':trayOpen=!trayOpen;swapFor=null;if(trayOpen&&!mySounds.length)void request('/api/sounds').then(x=>{mySounds=x.sounds;renderTray();}).catch(()=>{});renderTray(true);renderStage();if(trayOpen){openLayer(el.tray,()=>{trayOpen=false;swapFor=null;renderTray();renderStage();closeLayer(el.tray);});}return;
       case 'close-tray':trayOpen=false;swapFor=null;stopPreview();renderTray();renderStage();closeLayer(el.tray);return;
       case 'filter':filter=btn.dataset.role as Role|'all';renderTray();$<HTMLElement>(`[data-act="filter"][data-role="${filter}"]`,el.tray)?.focus();return;
       case 'preview':return preview(btn);
@@ -433,7 +433,7 @@ export async function mountRoom(host:HTMLElement,id:string){
       case 'close-drawer':return closeDrawer();
       case 'tab':{if(drawer?.kind!=='part')return;drawer.tab=btn.dataset.tab as 'part';if(drawer.tab!=='part')await takeLease(drawer.id);renderDrawer();$<HTMLElement>(`#tab-${drawer.tab}`,el.drawer)?.focus();return;}
       case 'mute':{const m=mixOf(pid!);const p=partOf(pid!)!;await command2('part.mix',{trackId:pid,mute:!m.mute},p.revision,`${p.name} ${m.mute?'unmuted':'muted'} · {bar}`);return;}
-      case 'swap-open':{if(!(await takeLease(pid!)))return;swapFor=pid!;trayOpen=true;filter=partOf(pid!)!.role==='custom'?'all':partOf(pid!)!.role as Role;renderTray();el.tray.scrollIntoView({block:'nearest'});$<HTMLElement>('#pack',el.tray)?.focus();return;}
+      case 'swap-open':{if(!(await takeLease(pid!)))return;swapFor=pid!;trayOpen=true;filter=partOf(pid!)!.role==='custom'?'all':partOf(pid!)!.role as Role;renderTray(true);el.tray.scrollIntoView({block:'nearest'});$<HTMLElement>('#pack',el.tray)?.focus();return;}
       case 'duplicate':{const r=await command2('part.duplicate',{trackId:pid},undefined,'Duplicated · {bar}');select(r.entityId);return;}
       case 'keep':await command2('part.keep',{trackId:pid},undefined,'Kept in the project as a new part.');return;
       case 'remove':{const p=partOf(pid!)!;if(!(await takeLease(pid!)))return;await command2('part.remove',{trackId:pid},p.revision,`${p.name} removed. Bring it back from Settings.`);leaseHeld=null;closeDrawer();return;}
