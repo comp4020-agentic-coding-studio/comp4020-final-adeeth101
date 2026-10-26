@@ -37,7 +37,7 @@ export class StudioAudio {
   // The preview channel: one part on this device only, on its own loop.
   private preview:{pattern:Pattern;timer:ReturnType<typeof setInterval>;epoch:number;cursor:number;bpm:number}|null=null;
   trace:AudioTrace[]=[];
-  stats={scheduled:0,late:0,slowestTickMs:0};
+  stats={scheduled:0,late:0,resyncs:0,slowestTickMs:0};
   onError:(message:string)=>void=()=>{};
   onLag:(skipped:number)=>void=()=>{};
   onBeat:(trackId:string,at:number)=>void=()=>{};
@@ -117,13 +117,35 @@ export class StudioAudio {
         p.cursor=until;}
     }catch(e){this.stopPreview();this.onError(e instanceof Error?e.message:'Preview failed.');}
   }
+  // How many onsets the current plan holds over a span of cycles, used to say
+  // what a resync skipped.
+  private onsetsBetween(from:number,to:number){
+    if(!(to>from))return 0;
+    let n=0;
+    for(let cycle=Math.floor(from);cycle<to;cycle++){
+      const p=planAt(this.plans,cycle);if(!p)continue;
+      for(const x of resolvePlan(p,cycle).filter(x=>!this.exclude.has(x.trackId)&&(!this.solo.size||this.solo.has(x.trackId)))){
+        const pattern=this.pattern(`${x.trackId}:${x.slot}:${x.revision}`,x.document as AnyDocument);
+        n+=pattern.queryArc(Math.max(cycle,from),Math.min(cycle+1,to),{_cps:this.bpm/240}).filter(h=>h.hasOnset()).length;
+      }
+    }
+    return n;
+  }
   private tick(){
     const started=performance.now();
     try{
       const c=this.context!;const now=Date.now()+this.offset;
       const end=Math.max(0,cycleAt(now+160,this.epoch,this.bpm));
       if(this.cursor>=end)return;
-      if(cycleAt(now-500,this.epoch,this.bpm)>this.cursor){this.cursor=Math.ceil(cycleAt(now+120,this.epoch,this.bpm));return;}
+      // More than half a bar behind: skip to the next bar rather than play the
+      // past. What is skipped is counted, so the page can say so instead of
+      // reporting nothing while a bar goes missing.
+      const behind=cycleAt(now-500,this.epoch,this.bpm);
+      if(behind>this.cursor){
+        const skipped=this.onsetsBetween(this.cursor,Math.ceil(cycleAt(now+120,this.epoch,this.bpm)));
+        this.cursor=Math.ceil(cycleAt(now+120,this.epoch,this.bpm));
+        this.stats.late+=skipped;this.stats.resyncs++;this.lagCount+=skipped;return;
+      }
       while(this.cursor<end){
         const begin=this.cursor, until=Math.min(end,Math.floor(begin+1e-8)+1);
         const p=planAt(this.plans,begin);
