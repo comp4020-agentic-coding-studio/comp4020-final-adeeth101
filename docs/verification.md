@@ -16,12 +16,31 @@ and Fly run.
 | --- | --- | --- |
 | Types | `pnpm typecheck` | no errors |
 | Client build | `pnpm build` | passes; largest chunk is the audio engine at 212 KB (74 KB gzip), loaded on the first sound gesture |
-| Spec against the container | `APP_URL=… CI=true pnpm check` | 21 files, 251 passed, 1 skipped (the README live-edit check, skipped in CI by design) |
-| Browser flows against the container | `APP_URL=… pnpm test:browser` | 9 passed; the suite was run four times in a row to confirm it is not flaky |
+| Spec against the container | `APP_URL=… CI=true pnpm check` | 23 files, 266 passed, 1 skipped (the README live-edit check, skipped in CI by design) |
+| Browser flows against the container | `APP_URL=… pnpm test:browser` | 11 passed |
 | Image | `docker build` | 245 MB; `node_modules` in it is Acorn only |
 | Container memory | `docker stats` | 33 MB idle, 44 MB after the browser flows, 41 MB under the load probe |
 | Graceful stop with six streams open | `docker stop` | exits in 0.48 s |
 | Process evidence | `pnpm check:evidence` | passes (file presence and commit citations only) |
+
+### Faults found by an independent review, and fixed
+
+Reproduced here before fixing, each with a regression that fails first:
+
+- **An audience received clips nothing was playing.** A plan's catalog holds
+  every clip of every part, and the audience snapshot mapped all of them, so a
+  draft saved into an unused clip slot of a private project reached anyone
+  watching a public performance of it, while `/api/projects/:id` correctly
+  answered 404. Performances now publish only the revisions they can reach
+  (`publishedPlan`); see the projection rule in the contract.
+- **Hosting split in two.** Passing the host role in the room moved the
+  transport but not the live performance, so the project named one host and
+  the performance obeyed another: the new host could not moderate, the old one
+  still could, and the credits were wrong. One operation now moves both.
+- **An invitation looked invalid after a reload.** The page previewed with the
+  fragment token but accepted with the stored one, so once the fragment was
+  cleared a reload showed "This invitation isn't valid" with a perfectly good
+  token still in session storage.
 
 ### Faults found while verifying this release
 
@@ -86,6 +105,9 @@ isolated browser identities and production assets:
 - the server is killed mid-edit: the page says so, stops sound, keeps the code
   draft, reconnects, and the same person applies it
 - a code draft survives a reload before it is applied
+- an invitation survives a reload and is then accepted; the used link cannot
+  be used again by anyone; and the whole path works where session storage
+  throws, as in a locked-down private window
 - reduced motion: the performers stop moving entirely, and the stage still
   names what each part is doing in words
 - a slow connection (about slow 3G: 400 kbit down, 300 ms each way): a

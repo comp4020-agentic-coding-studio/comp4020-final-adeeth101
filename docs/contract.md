@@ -240,9 +240,48 @@ manual overrides, scene and arrangement. At cycle `c` the plan with the
 highest `effectiveCycle ≤ c` applies. Live changes take effect at the first
 bar starting at least 1000 ms ahead.
 
+### What a performance publishes
+
+A member's plan holds every clip of every part, because that is the room's
+workspace. An audience receives a **published plan** instead
+(`publishedPlan` in `shared/performance.ts`): each plan reduced to the
+musical revisions that performance can actually reach.
+
+For each part, that is the slot its manual override names, or, with no
+override, the slot each **reachable scene** assigns. The reachable scenes are
+every scene a running arrangement lists, so a transition always has its music
+ahead of time, and otherwise just the current one. A muted part publishes
+nothing at all, since unmuting writes a new plan anyway. A part with nothing
+selected publishes nothing, which `resolvePlan` already reads as silence.
+
+Everything else stays with the members: a draft saved into another clip slot,
+a scene nobody has launched, a part that is muted. Dropping those is safe
+because any change that makes one necessary — launching its scene, unmuting
+it, starting an arrangement — publishes a new plan carrying it, effective at
+the bar that change takes effect. Late joins read the same published plans at
+the shared phase, so they hear what everyone else hears.
+
+Source text, revision history, provenance, drafts, members, chat and
+invitations are never part of an audience response at all.
+
+### One host
+
+Hosting is a single role: it controls the shared transport and, while a
+performance is live, that performance. `setHost` in `src/studio.ts` is the
+only thing that moves it, and it moves the transport lease, the performance's
+host and its participant roles together, in one transaction. Every path uses
+it — passing from the room or the performance page, releasing, claiming, a
+member starting a stopped mix, removing the host, and the lapsed-lease sweep.
+Transferring preserves musical phase: the epoch and generation do not change.
+
 The host lease lasts 30 s and the room page renews it with its heartbeat.
 When it lapses while playing, the server stops the mix and frees the host
-role. A live performance whose host has gone for 30 s ends as `host-left`.
+role. A live performance left with nobody hosting — the host released the
+role, was removed, or their lease lapsed — ends, as a restart ends one,
+because there is then nobody accountable for what an audience is hearing.
+Ending a performance is host **or owner**: the owner keeps that power over
+their own project whoever is hosting.
+
 Edit leases last 30 s and renew every 10 s while a part is open.
 
 A restart ends live performances as `interrupted` (guest parts leave), stops

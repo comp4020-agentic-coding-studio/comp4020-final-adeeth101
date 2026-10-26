@@ -99,6 +99,40 @@ server stops it rather than leaving a room playing to nobody, and any member
 can take over. Hosting is a playback role; ownership (membership,
 visibility) stays separate.
 
+That role lives in two places — the transport, and a live performance — and
+for a while two code paths moved them, which let them drift: the room could
+say one member was hosting while the performance still obeyed another, so the
+new host could not moderate and the old one still could. `setHost` is now
+the only way it moves, and it moves both in one transaction. The useful
+consequence is that there is one question to answer anywhere in the code,
+who is hosting, rather than two that can disagree.
+
+Releasing the role while live raised a question the earlier code never had to
+answer: who is accountable for a performance with nobody hosting? Leaving the
+previous host named would have kept handing them powers they had just given
+up. The performance ends instead, which is what already happens when a host's
+connection dies, so there is one rule rather than two.
+
+## What an audience is allowed to receive
+
+A member's plan carries the whole room's workspace, because that is what a
+member edits. Sending it to an audience was a leak: a draft saved into another
+clip slot, or a scene nobody had launched, travelled to anyone watching a
+public performance of an otherwise private project. The project's own access
+check was right; a different response simply carried more than it needed.
+
+The projection is deliberately narrow and computed from the plan rather than
+filtered after the fact: a part publishes only the clip its override names, or
+the clips its reachable scenes assign, and a muted part publishes nothing. It
+is safe to send less because the plan is already the unit of change. Anything
+that makes a clip necessary writes a new plan at a future bar, so the music
+arrives with the decision that needs it rather than ahead of it, and a late
+joiner reads exactly what everyone else is playing.
+
+The alternative — sending the catalog and trusting the audience page not to
+play the rest — would have put a privacy boundary in client code, where it is
+one bug or one opened developer console away from meaning nothing.
+
 ## Performances on the project's own clock
 
 A performance is a row pointing at a project, not a second transport: the
