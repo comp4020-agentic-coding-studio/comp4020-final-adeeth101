@@ -16,12 +16,28 @@ and Fly run.
 | --- | --- | --- |
 | Types | `pnpm typecheck` | no errors |
 | Client build | `pnpm build` | passes; largest chunk is the audio engine at 212 KB (74 KB gzip), loaded on the first sound gesture |
-| Spec against the container | `APP_URL=… CI=true pnpm check` | 21 files, 248 passed, 1 skipped (the README live-edit check, skipped in CI by design) |
-| Browser flows against the container | `APP_URL=… pnpm test:browser` | 7 passed |
+| Spec against the container | `APP_URL=… CI=true pnpm check` | 21 files, 251 passed, 1 skipped (the README live-edit check, skipped in CI by design) |
+| Browser flows against the container | `APP_URL=… pnpm test:browser` | 9 passed; the suite was run four times in a row to confirm it is not flaky |
 | Image | `docker build` | 245 MB; `node_modules` in it is Acorn only |
 | Container memory | `docker stats` | 33 MB idle, 44 MB after the browser flows, 41 MB under the load probe |
 | Graceful stop with six streams open | `docker stop` | exits in 0.48 s |
 | Process evidence | `pnpm check:evidence` | passes (file presence and commit citations only) |
+
+### Faults found while verifying this release
+
+- **The no-script path was refused.** The shell asked for `no-referrer`,
+  which makes Chrome send `Origin: null` on a form post; the origin check
+  read that as another site and answered 403, so a visitor without
+  JavaScript pressed Start a mix and landed on `/api/projects` looking at
+  JSON. Found by running the home page with JavaScript switched off.
+- **The origin check answered 500, not 403,** for any origin that would not
+  parse, because `new URL()` threw. Found while following the above.
+- **Keyboard focus was dropped** when the sound tray re-rendered, so Enter
+  on Add and play sometimes did nothing. It failed about one browser run in
+  three before it was understood; four consecutive runs are green since.
+- **A resync skipped sounds silently** (see the load probe below).
+- **A stream written to after it ended** crashed the process; found by
+  `spec/access.test.ts` when a removed member’s stream was closed.
 
 ### Diagnosis before the rewrite
 
@@ -70,6 +86,11 @@ isolated browser identities and production assets:
 - the server is killed mid-edit: the page says so, stops sound, keeps the code
   draft, reconnects, and the same person applies it
 - a code draft survives a reload before it is applied
+- reduced motion: the performers stop moving entirely, and the stage still
+  names what each part is doing in words
+- a slow connection (about slow 3G: 400 kbit down, 300 ms each way): a
+  newcomer still reaches the room, adds a performer and starts sound, typing
+  stays local, and pressing Apply twice leaves one part at one new revision
 
 ### Migration from Stream data
 
