@@ -141,3 +141,50 @@ test('a refused live stream falls back to polling and still saves',async({browse
   await expect.poll(async()=>(await snapshot(first)).parts.length).toBe(1);
   await ctx.close();
 });
+
+test('an invitation survives a reload, and is still only usable once',async({browser})=>{
+  const host=await browser.newContext({viewport:{width:1280,height:800}});
+  const guest=await browser.newContext({viewport:{width:390,height:844}});
+  const a=await host.newPage(),b=await guest.newPage();
+  await a.goto('/');await a.getByRole('button',{name:'Start a mix'}).click();await a.waitForURL(/\/p\//);
+  await a.getByRole('button',{name:/Add and play/}).first().click();
+  await expect(a.locator('.performer[data-part]')).toHaveCount(1);
+  await a.getByRole('button',{name:'Close the sound tray'}).click();
+  await a.getByRole('button',{name:'Invite'}).click();await a.getByRole('button',{name:'Create link'}).click();
+  const link=await a.locator('.link-out').inputValue();await a.keyboard.press('Escape');
+  await b.goto(link);
+  await expect(b.getByRole('heading',{level:1})).toContainText('invited you to join');
+  // The fragment is gone from the address bar straight away.
+  expect(b.url()).not.toContain('#');
+  // Reloading before accepting must not lose the invitation.
+  await b.reload();
+  await expect(b.getByRole('heading',{level:1})).toContainText('invited you to join');
+  const accept=b.getByRole('button',{name:'Join and enable sound'});
+  await expect(accept).toBeVisible();
+  await accept.click();
+  await b.waitForURL(/\/p\//);
+  await expect(b.locator('.performer[data-part]')).toHaveCount(1);
+  // The used token is forgotten, and the link cannot be used again.
+  await b.goto(link.replace(/#.*/,''));
+  await expect(b.getByRole('heading',{level:1})).toContainText(/isn’t valid|can’t be used/);
+  const third=await browser.newContext();const c=await third.newPage();
+  await c.goto(link);
+  await expect(c.getByRole('heading',{level:1})).toContainText(/can’t be used|already been used/);
+  await host.close();await guest.close();await third.close();
+});
+
+test('an invitation still works where session storage is unavailable',async({browser})=>{
+  const host=await browser.newContext();const guest=await browser.newContext();
+  const a=await host.newPage(),b=await guest.newPage();
+  await a.goto('/');await a.getByRole('button',{name:'Start a mix'}).click();await a.waitForURL(/\/p\//);
+  await a.getByRole('button',{name:'Invite'}).click();await a.getByRole('button',{name:'Create link'}).click();
+  const link=await a.locator('.link-out').inputValue();
+  // A browser that throws on any storage access, as a locked-down private window does.
+  await b.addInitScript(()=>{const boom=()=>{throw new Error('denied');};
+    Object.defineProperty(window,'sessionStorage',{get:boom});});
+  await b.goto(link);
+  await expect(b.getByRole('heading',{level:1})).toContainText('invited you to join');
+  await b.getByRole('button',{name:'Join and enable sound'}).click();
+  await b.waitForURL(/\/p\//);
+  await host.close();await guest.close();
+});

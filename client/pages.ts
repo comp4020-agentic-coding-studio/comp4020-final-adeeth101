@@ -95,12 +95,25 @@ export async function mountFriends(host:HTMLElement){
 // in a request line or referrer), is exchanged by POST, then cleared from the
 // address bar.
 export async function mountInvite(host:HTMLElement,id:string){
-  const token=new URLSearchParams(location.hash.slice(1)).get('t')??location.hash.slice(1);
+  // The token is resolved once, before anything asks about it: from the
+  // fragment on the first visit, otherwise from the one this tab kept. Reading
+  // it afterwards previewed with an empty token and told people a perfectly
+  // good invitation was invalid, with the real one still sitting in storage.
+  const stored=(()=>{try{return sessionStorage.getItem(`invite:${id}`)??'';}catch{return '';}})();
+  const fromLink=new URLSearchParams(location.hash.slice(1)).get('t')??location.hash.slice(1);
+  const token=fromLink||stored;
+  // Clear the fragment first: a reload, a shared screen or a copied address
+  // should not carry it, whatever happens next.
+  if(fromLink)history.replaceState(null,'',location.pathname);
   let preview:any;
   try{preview=await request(`/api/invitations/${id}/preview`,{token});}catch(e){preview={state:'invalid',message:errorText(e)};}
-  if(token&&preview.state!=='invalid')sessionStorage.setItem(`invite:${id}`,token);
-  const kept=token||sessionStorage.getItem(`invite:${id}`)||'';
-  history.replaceState(null,'',location.pathname);
+  // Keep a token that works, so a reload or a second look still shows the
+  // invitation. A token the server rejects is forgotten rather than retried.
+  try{
+    if(token&&preview.state!=='invalid')sessionStorage.setItem(`invite:${id}`,token);
+    else if(preview.state==='invalid')sessionStorage.removeItem(`invite:${id}`);
+  }catch{/* private window: the link still works, a reload just needs it again */}
+  const kept=token;
   const roleText=preview.kind==='project'?'as a <strong>member</strong>: you can add and change parts and chat with the group':'as a <strong>guest performer</strong> for this performance only: you can add your own parts while it is live. It doesn’t make you a member of the mix';
   host.innerHTML=preview.state==='open'||preview.state==='member'?`<section class="page invite card"><p class="eyebrow">Invitation</p><h1>${esc(preview.from)} invited you to ${preview.kind==='project'?'join':'perform in'} “${esc(preview.title)}”</h1>
       <p>You’d join ${roleText}.</p>${preview.kind==='perform'&&!preview.live?'<p class="notice">This performance has ended.</p>':''}
@@ -110,7 +123,9 @@ export async function mountInvite(host:HTMLElement,id:string){
   on(host,'click','[data-act="accept"]',async b=>{
     (b as HTMLButtonElement).disabled=true;
     const soundOk=await enable().then(()=>true).catch(()=>false);
-    try{const r=await request(`/api/invitations/${id}/accept`,{token:kept});sessionStorage.removeItem(`invite:${id}`);sessionStorage.setItem('ensemble-sound','1');location.href=r.kind==='project'?`/p/${r.projectId}${soundOk?'':'?sound=off'}`:`/live/${r.performanceId}`;}
+    try{const r=await request(`/api/invitations/${id}/accept`,{token:kept});
+      // Used up: forget it, so a stale token is never offered again.
+      try{sessionStorage.removeItem(`invite:${id}`);sessionStorage.setItem('ensemble-sound','1');}catch{}location.href=r.kind==='project'?`/p/${r.projectId}${soundOk?'':'?sound=off'}`:`/live/${r.performanceId}`;}
     catch(e){(b as HTMLButtonElement).disabled=false;toast(errorText(e));if((e as ApiError).status===410)setTimeout(()=>location.reload(),1500);}
   });
 }
