@@ -9,9 +9,18 @@ import { db, now } from "./db.ts";
 const insertEvent = db.prepare(
   "insert into event (visitor_id, kind, payload, created_at) values (?, ?, ?, ?) returning id",
 );
-const sinceEvents = db.prepare(
-  "select id, visitor_id, kind, payload, created_at from event where id > ? order by id limit 200",
-);
+// The event table is shared with project rooms, whose events are private to
+// their members. This stream is the sketchpad's own, and is public, so it reads
+// only the sketchpad's kinds: anything else written to the table stays out of it.
+export const LEGACY_KINDS = ["trace.created", "trace.updated", "visitor.renamed"] as const;
+// Prepared on first use: project_id is added by the studio migration, which
+// runs after this module loads.
+let sinceEvents: ReturnType<typeof db.prepare> | null = null;
+const sinceQuery = () => (sinceEvents ??= db.prepare(
+  `select id, visitor_id, kind, payload, created_at from event
+    where id > ? and project_id is null and kind in (${LEGACY_KINDS.map(() => "?").join(",")})
+    order by id limit 200`,
+));
 
 export type Event = {
   id: number;
@@ -69,7 +78,7 @@ export function publish(event: Event): void {
   }
 }
 
-export const since = (id: number): Event[] => sinceEvents.all(id) as Event[];
+export const since = (id: number): Event[] => sinceQuery().all(id, ...LEGACY_KINDS) as Event[];
 
 const newest = db.prepare("select coalesce(max(id), 0) as id from event");
 

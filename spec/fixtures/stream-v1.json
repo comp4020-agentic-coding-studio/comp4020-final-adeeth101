@@ -1,0 +1,20 @@
+{
+  "note": "Built from the Stream server at 70a5a2d through its public HTTP API; see spec/migration.test.ts.",
+  "visitors": {
+    "ada": "a998e6d2-3583-4c3c-bb17-9c87e784e5c9",
+    "bo": "1ca496fe-bdb3-4141-8c79-acd68622ad4b"
+  },
+  "projects": {
+    "shared": "1e9d121f-24ba-48b8-92b4-f816f6ec5746",
+    "solo": "6cc381f2-29a3-42aa-af3f-2430d0a11e02"
+  },
+  "tracks": {
+    "adaKit": "3da5af55-2140-4eae-ba59-24c85cbb7bfd",
+    "boMelody": "aef4bb96-30fc-4da1-846d-c2abf82748b0",
+    "boArchived": "29735f52-e8f0-40a9-8e60-e60a71de82fb"
+  },
+  "sources": {
+    "drumsRevision1": "stack(s(\"bd ~ bd ~\"), s(\"~ sd ~ sd\"))",
+    "melody": "note(\"60 ~ 64 67\").s(\"sawtooth\").lpf(1800).room(0.2)"
+  }
+}
