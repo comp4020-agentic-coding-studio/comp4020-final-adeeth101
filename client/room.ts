@@ -45,7 +45,6 @@ export async function mountRoom(host:HTMLElement,id:string){
   const mixOf=(pid:string)=>state.plans.at(-1)?.mix[pid]??{gain:0.7,mute:false};
   const online=()=>connection==='live'||Date.now()-lastOk<3000;
   const playing=()=>state.transport.status==='playing';
-  const blocked=new Set<string>();
 
   host.innerHTML=`<div class="room">
     <header class="room-head">
@@ -247,7 +246,7 @@ export async function mountRoom(host:HTMLElement,id:string){
       ${!owner()?'<p class="small"><button class="ghost small" data-act="leave">Leave this mix</button></p>':''}
       <section class="chat" aria-label="Project chat"><h3>Chat <span class="small muted">· members only</span></h3>
       ${chat.more?'<button class="ghost small" data-act="chat-more">Earlier messages</button>':''}
-      <ol id="chat-log" class="chat-log" aria-live="polite">${chat.messages.filter(m=>!blocked.has(m.authorId)).map(m=>`<li class="${m.authorId===you().id?'mine':''}"><span class="who">${esc(m.author)}</span>${m.deleted?'<em class="muted">message removed</em>':`<span class="body">${esc(m.body)}</span>`}<time class="small muted">${ago(m.createdAt)}</time>${!m.deleted&&(m.authorId===you().id||owner()||isHost())?`<button class="ghost tiny" data-act="chat-delete" data-id="${m.id}" aria-label="Remove message">✕</button>`:''}</li>`).join('')}${outbox.map(o=>`<li class="mine pending"><span class="who">${esc(you().handle)}</span><span class="body">${esc(o.body)}</span><span class="small ${o.failed?'error':'muted'}">${o.failed?`Not sent · <button class="ghost tiny" data-act="chat-retry" data-id="${o.clientId}">Retry</button>`:'Sending…'}</span></li>`).join('')}</ol>
+      <ol id="chat-log" class="chat-log" aria-live="polite">${chat.messages.map(m=>`<li class="${m.authorId===you().id?'mine':''}"><span class="who">${esc(m.author)}</span>${m.deleted?'<em class="muted">message removed</em>':`<span class="body">${esc(m.body)}</span>`}<time class="small muted">${ago(m.createdAt)}</time>${!m.deleted&&(m.authorId===you().id||owner()||isHost())?`<button class="ghost tiny" data-act="chat-delete" data-id="${m.id}" aria-label="Remove message">✕</button>`:''}</li>`).join('')}${outbox.map(o=>`<li class="mine pending"><span class="who">${esc(you().handle)}</span><span class="body">${esc(o.body)}</span><span class="small ${o.failed?'error':'muted'}">${o.failed?`Not sent · <button class="ghost tiny" data-act="chat-retry" data-id="${o.clientId}">Retry</button>`:'Sending…'}</span></li>`).join('')}</ol>
       <form data-form="chat" class="chat-form"><label for="chat-input" class="sr-only">Message</label><textarea id="chat-input" maxlength="500" rows="2" placeholder="Say something to the group"></textarea><button class="primary" type="submit">Send</button></form></section>`;
     const log=$('#chat-log',el.drawer);if(log)log.scrollTop=log.scrollHeight;
   }
@@ -538,6 +537,7 @@ export async function mountRoom(host:HTMLElement,id:string){
   // --- live connection, presence, clocks ----------------------------------------------------
   const live=connect(()=>`/api/projects/${id}/events?since=${state.eventId}`,{
     change:(kind)=>{
+      if(kind==='chat.filter'){void loadChat();return;}
       if(kind==='chat'||kind==='chat.deleted'){if(drawer?.kind==='people')void loadChat();else if(kind==='chat'){unread++;renderHead();}return;}
       if(kind==='presence'||kind==='lease'){void refresh().catch(()=>{});return;}
       scheduleRefresh();
@@ -558,7 +558,7 @@ export async function mountRoom(host:HTMLElement,id:string){
   offset=await calibrate().catch(()=>0);
   render();if(trayOpen){openLayer(el.tray,()=>{trayOpen=false;renderTray();renderStage();closeLayer(el.tray);});}
   (window as any).ensembleDebug={snapshot:()=>state,audio:()=>current(),live,offset:()=>offset};
-  void audio;void blocked;
+  void audio;
 }
 
 // A non-member viewing a public or unlisted mix: the saved parts and credits,

@@ -124,7 +124,7 @@ export function performanceChat(v:Visitor,performanceId:string){
   const a=readPerformance(v,performanceId);
   // Once it ends, chat is for the host's review only, for seven days.
   if(a.performance.status!=='live')need(a.role==='host'||memberRole(a.performance.project_id,v.id)==='owner','Chat closed when the performance ended.',410);
-  return {messages:rows('select c.*,v.handle from performance_chat c join visitor v on v.id=c.visitor_id where c.performance_id=? order by c.id desc limit 80',performanceId).reverse().map(chatRow)};
+  return {messages:rows('select c.*,v.handle from performance_chat c join visitor v on v.id=c.visitor_id where c.performance_id=? and not exists(select 1 from block_link b where b.blocker_id=? and b.blocked_id=c.visitor_id) order by c.id desc limit 80',performanceId,v.id).reverse().map(chatRow)};
 }
 export function sendPerformanceChat(v:Visitor,performanceId:string,input:Row){
   const clientId=typeof input.clientId==='string'&&/^[0-9a-f-]{36}$/i.test(input.clientId)?input.clientId:null;need(clientId,'Message needs a client id.');

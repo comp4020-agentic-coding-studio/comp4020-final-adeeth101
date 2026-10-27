@@ -9,6 +9,15 @@ the shape indices to unsigned shifts. Local Node 24.21.0: `pnpm check` passes
 configured desktop/phone viewports. These checks establish rendering and
 interaction behaviour, not a human listening or usability result.
 
+## 28 October 2026: blocked chat
+
+Blocked authors are filtered in the SQL query before pagination in project
+and audience chat. Block/unblock invalidates only the blocker's open views,
+without deleting history or changing membership. Both HTTP regressions failed
+before the fix. The production browser regression checks live filtering,
+reload, unblocking, retained input and another listener's unchanged view.
+Local `pnpm check`: 270 tests pass; production browser flows: 12 pass.
+
 What has been checked, how, and what was observed. Each entry names the
 environment and the exact result; nothing here is an expected outcome.
 What has *not* been checked is at the end, and matters just as much.

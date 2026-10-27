@@ -8,7 +8,7 @@ import {persist,derive,sameToken,type Visitor} from './identity.ts';
 import {logAction} from './events.ts';
 import {CommandError,need,hidden,text,one,rows,run,tx,limit} from './errors.ts';
 import {memberRole,tokenHash,newToken,projectAccess,performanceAccess} from './access.ts';
-import {addEvent,broadcast,revalidate,openStream} from './hub.ts';
+import {addEvent,broadcast,revalidate,openStream,invalidateVisitor} from './hub.ts';
 import {isOnline,heartbeat,announce,editCapacity,ROOM_LIMITS} from './studio.ts';
 
 type Row=Record<string,any>;
@@ -98,9 +98,9 @@ export function friendAction(v:Visitor,input:Row){
         run('delete from friend_link where low_id=? and high_id=?',lo,hi);run('insert or ignore into block_link values(?,?,?)',v.id,target,now);
         // Pending invitations between them stop working.
         run('update invitation set revoked_at=? where revoked_at is null and ((created_by=? and recipient_id=?) or (created_by=? and recipient_id=?))',now,v.id,target,target,v.id);
-        pingAccount(after,target!,'friends');return {ok:true,status:'blocked'};
+        pingAccount(after,target!,'friends');after(()=>invalidateVisitor(v.id,'chat.filter'));return {ok:true,status:'blocked'};
       }
-      case 'unblock':{run('delete from block_link where blocker_id=? and blocked_id=?',v.id,target);return {ok:true,status:'none'};}
+      case 'unblock':{run('delete from block_link where blocker_id=? and blocked_id=?',v.id,target);after(()=>invalidateVisitor(v.id,'chat.filter'));return {ok:true,status:'none'};}
       default:throw new CommandError('Unknown friend action.');
     }
   });

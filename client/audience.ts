@@ -91,7 +91,7 @@ export async function mountAudience(host:HTMLElement,id:string){
   while(s.full&&s.status==='live'){render();await new Promise(r=>setTimeout(r,5000));await refresh();}
   if(s.status==='live'){
     connect(()=>`/api/performances/${id}/events?since=${s.eventId}`,{
-      change:(kind,data)=>{if(kind==='reaction'){burst(data.reaction);return;}if(kind==='chat'||kind==='moderation.delete'){void loadChat();}if(kind==='performance.ended'){void refresh();return;}if(!pending)pending=setTimeout(()=>{pending=null;void refresh();},80);},
+      change:(kind,data)=>{if(kind==='reaction'){burst(data.reaction);return;}if(kind==='chat'||kind==='chat.filter'||kind==='moderation.delete'){void loadChat();}if(kind==='performance.ended'){void refresh();return;}if(!pending)pending=setTimeout(()=>{pending=null;void refresh();},80);},
       state:st=>{connection=st;if(st==='revoked'){current()?.stop();listening=false;void refresh();}render();syncAudio();},
       poll:()=>refresh(),
     });

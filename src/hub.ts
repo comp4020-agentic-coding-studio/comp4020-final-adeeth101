@@ -29,6 +29,14 @@ export function broadcast(scope:Scope,eventId:number,kind:string,payload:Record<
     send(l,`id: ${eventId}\nevent: change\ndata: ${data}\n\n`);
   }
 }
+// Personal view changes invalidate only this visitor's open pages. No resource
+// payload or cursor is sent; reconnects read the durable preference afresh.
+export function invalidateVisitor(visitorId:string,kind:string){
+  for(const l of [...listeners])if(l.visitorId===visitorId){
+    if(l.res.writableLength>STREAM_LIMITS.bufferBytes){drop(l);continue;}
+    send(l,`event: change\ndata: ${JSON.stringify({kind})}\n\n`);
+  }
+}
 // After membership, visibility or a kick changes, every open stream is asked
 // again whether it may still listen; those that may not are closed.
 export function revalidate(){for(const l of [...listeners]){let ok=false;try{ok=l.check();}catch{ok=false;}if(!ok)drop(l,'event: revoked\ndata: {}\n\n');}}

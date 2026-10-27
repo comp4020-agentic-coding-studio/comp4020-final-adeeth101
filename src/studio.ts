@@ -424,7 +424,7 @@ setInterval(sweepHosts,2000).unref();
 export function projectChat(v:Visitor,id:string,before:unknown){
   const a=projectAccess(v,id);if(!a||a.read!=='member')throw hidden();
   const cursor=Number(before);const limitRows=ROOM_LIMITS.chatPage;
-  const list=rows(`select c.id,c.visitor_id,c.client_id,c.body,c.created_at,c.deleted_at,v.handle from project_chat c join visitor v on v.id=c.visitor_id where c.project_id=? ${Number.isFinite(cursor)&&cursor>0?'and c.id<?':''} order by c.id desc limit ?`,...(Number.isFinite(cursor)&&cursor>0?[id,cursor,limitRows+1]:[id,limitRows+1]));
+  const list=rows(`select c.id,c.visitor_id,c.client_id,c.body,c.created_at,c.deleted_at,v.handle from project_chat c join visitor v on v.id=c.visitor_id where c.project_id=? and not exists(select 1 from block_link b where b.blocker_id=? and b.blocked_id=c.visitor_id) ${Number.isFinite(cursor)&&cursor>0?'and c.id<?':''} order by c.id desc limit ?`,...(Number.isFinite(cursor)&&cursor>0?[id,v.id,cursor,limitRows+1]:[id,v.id,limitRows+1]));
   return {messages:list.slice(0,limitRows).reverse().map(chatRow),more:list.length>limitRows};
 }
 export const chatRow=(c:Row)=>({id:c.id,authorId:c.visitor_id,author:c.handle,clientId:c.client_id,body:c.deleted_at?null:c.body,deleted:!!c.deleted_at,createdAt:c.created_at});
