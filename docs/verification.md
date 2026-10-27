@@ -18,6 +18,17 @@ before the fix. The production browser regression checks live filtering,
 reload, unblocking, retained input and another listener's unchanged view.
 Local `pnpm check`: 270 tests pass; production browser flows: 12 pass.
 
+## 28 October 2026: Stop retains the sounding plan
+
+A save call had been swallowed by a line comment in `stopTransport`, leaving
+no plan after Stop. The new HTTP regression failed with an empty plan list;
+Stop now saves the current plan before removing old generations, retaining
+effective volume/mute settings for the next Play. Local gate: 271 tests pass.
+The browser run exposed a test-only race: the reload assertion read its debug
+probe before clock calibration installed it. Waiting for that probe fixed the
+affected recovery flow (1 passed); the other 11 flows had passed in that run.
+The complete browser suite will be rerun with the remaining guest changes.
+
 What has been checked, how, and what was observed. Each entry names the
 environment and the exact result; nothing here is an expected outcome.
 What has *not* been checked is at the end, and matters just as much.

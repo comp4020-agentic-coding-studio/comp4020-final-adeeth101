@@ -149,7 +149,9 @@ function startTransport(id:string,t:Row,now:number){
 function stopTransport(id:string,t:Row,bpm:number,now:number,releaseHost=false){
   const cycle=t.epoch_ms?cycleAt(now,t.epoch_ms,bpm):0;
   const latest=structuredClone(planAt(plansFor(id,t.generation),cycle)??plansFor(id,t.generation).at(-1)??blankPlan());latest.scene=sceneAt(latest,cycle);syncCatalog(id,latest);latest.generation=t.generation+1;latest.planRevision=0;latest.effectiveCycle=0;latest.arrangement=null;
-  run("update transport set status='stopped',epoch_ms=null,generation=generation+1,revision=revision+1 where project_id=?",id);if(releaseHost)setHost(id,null,now); // the sweep in performances.ts ends any live sessionsavePlan(id,latest);
+  run("update transport set status='stopped',epoch_ms=null,generation=generation+1,revision=revision+1 where project_id=?",id);
+  if(releaseHost)setHost(id,null,now);
+  savePlan(id,latest);
   run('delete from performance_plan where project_id=? and generation<?',id,t.generation+1);
 }
 

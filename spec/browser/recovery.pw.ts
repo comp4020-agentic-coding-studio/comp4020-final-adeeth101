@@ -34,7 +34,9 @@ test('losing the server keeps the draft and stops shared sound; reconnecting res
     await expect.poll(()=>page.evaluate(()=>(window as any).ensembleDebug.snapshot().parts[0].clips.A.source)).toBe('s("bd ~ sd [~ bd]")');
     // A reload restores the same saved mix for the same person, and their local draft store is empty again.
     await page.reload();await expect(page.locator('.performer[data-part]')).toHaveCount(1);
-    expect(await page.evaluate(()=>(window as any).ensembleDebug.snapshot().you.role)).toBe('owner');
+    // The stage renders before clock calibration finishes and installs the
+    // debug probe. Wait for that startup step rather than racing the reload.
+    await expect.poll(()=>page.evaluate(()=>(window as any).ensembleDebug?.snapshot().you.role)).toBe('owner');
   }finally{await context.close();if(server)await kill();for(let i=0;i<20;i++){try{rmSync(dir,{recursive:true,force:true});break;}catch{await new Promise(r=>setTimeout(r,100));}}}
 });
 
