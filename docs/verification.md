@@ -1,5 +1,14 @@
 # Verification record
 
+## 28 October 2026: performer geometry
+
+High-bit seed hashes produced negative shape indices and omitted torso/mouth
+geometry. A regression using original high-bit seeds failed before changing
+the shape indices to unsigned shifts. Local Node 24.21.0: `pnpm check` passes
+268 tests and builds the client; the 11 production browser flows pass at the
+configured desktop/phone viewports. These checks establish rendering and
+interaction behaviour, not a human listening or usability result.
+
 What has been checked, how, and what was observed. Each entry names the
 environment and the exact result; nothing here is an expected outcome.
 What has *not* been checked is at the end, and matters just as much.

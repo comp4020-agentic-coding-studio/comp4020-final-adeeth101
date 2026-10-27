@@ -15,7 +15,8 @@ const ACCESSORY:Record<Look,string>={
 // Faces vary by a seed so two performers in the same role are still distinct.
 export function performerSvg(look:Look,seed:string){
   let h=0;for(const c of seed)h=(h*31+c.charCodeAt(0))>>>0;
-  const eye=h%3,mouth=(h>>3)%3,body=(h>>6)%3;
+  // Keep high-bit hashes unsigned: a negative array index drops the shape.
+  const eye=h%3,mouth=(h>>>3)%3,body=(h>>>6)%3;
   const eyes=['<circle cx="42" cy="44" r="3.4"/><circle cx="58" cy="44" r="3.4"/>','<path d="M38 44 q4 -4 8 0 M54 44 q4 -4 8 0" fill="none" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>','<rect x="39" y="41" width="6" height="6" rx="2"/><rect x="55" y="41" width="6" height="6" rx="2"/>'][eye];
   const mouths=['<path d="M43 55 q7 6 14 0" fill="none" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>','<ellipse cx="50" cy="56" rx="4" ry="3"/>','<path d="M44 56 h12" stroke="var(--ink)" stroke-width="3" stroke-linecap="round"/>'][mouth];
   const torso=['<rect x="30" y="66" width="40" height="42" rx="18"/>','<path d="M28 108 Q50 56 72 108 Z"/>','<rect x="32" y="66" width="36" height="42" rx="10"/>'][body];
