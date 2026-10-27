@@ -1,5 +1,23 @@
 # Verification record
 
+## 28 October 2026: deployed three-profile check
+
+Release `7f66d94` passed [GitHub checks and deployment](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/actions/runs/40541854705).
+Fly's machine metadata confirmed that exact commit on one 256 MB machine.
+A browser smoke check against the public URL then passed with three fresh
+profiles, a private project and an unlisted performance. The project was
+created before rollout: both identities and the second member's exact saved
+code survived deployment. The third profile listened and chatted, was refused
+project access (404), then became a guest and edited its own code. Stop/Play
+retained the plan, ending the performance retained the project, and no page
+JavaScript errors occurred. The private rehearsal was stopped and ended;
+no public performance listing was created.
+
+Production logs independently identified host and guest actions including
+`host.claim`, `transport.start`, `guest.add`, `guest.edit` and `transport.stop`.
+This verifies a deployed browser journey and redeploy persistence, not human
+musical taste, uncoached usability or audible alignment across devices.
+
 ## 28 October 2026: guest editing and final correction gate
 
 Node 24.21.0, production image `f562080d8d29`, limited to 256 MB with swap
@@ -257,7 +275,8 @@ and the v1 limits it protects are still in force for v1 parts.
 - **A real phone.** 4× CPU throttling is a stand-in, not a measurement.
 - **Two devices on a network.** Onset disagreement and output latency between
   machines are unmeasured.
-- **Anything deployed.** This release has not been deployed: the Fly URL,
-  restart after an idle stop, and a next-day return are unchecked.
+- **Idle-stop and next-day return.** The deployed journey and persistence
+  across rollout are checked above; a saved mix revisited after a routine
+  idle stop and the next day still need their own check.
 - **Load with real people.** The caps are enforced, but 32 listeners have
   never actually listened at once.
