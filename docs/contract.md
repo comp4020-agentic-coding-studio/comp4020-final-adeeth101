@@ -8,6 +8,25 @@ how, is in [verification](verification.md).
 
 ## Modules
 
+### Guest editing and personal chat views (28 October)
+
+The audience snapshot includes `ownerId` on public part credits and a separate
+`yourParts` array containing exact source, preset and clip revision only for
+the current guest's active session parts. Listener/member snapshots have an
+empty `yourParts`. This grants no project access or other guest's source or
+history. Guest edits require a positive `expectedRevision`; stale edits are
+409, removed parts are 410, invalid musical expressions are 422. The guest
+editor retains identity/performance/part-scoped local drafts, offers Code and
+semantics-preserving Shape controls, local preview, and explicit conflict
+recovery. Leaving or ending a performance preserves an open draft for copying.
+
+Chat queries exclude the current visitor's blocked authors before paging.
+Block/unblock sends only that visitor's open streams an ephemeral `chat.filter`
+invalidation after the durable block row commits. It has no resource payload
+and does not change the event cursor. Reconnect and polling reload filtered
+history, so losing the invalidation cannot permanently retain a stale view.
+Filtering never deletes shared history or removes project membership.
+
 | Path | Holds |
 | --- | --- |
 | `shared/expr.ts` | Version 2: the Strudel expression grammar, mini-notation, exact bounds, Shape edits |

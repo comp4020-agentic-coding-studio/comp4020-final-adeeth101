@@ -12,7 +12,7 @@ import {announce,setHost,onHostlessPerformance,replan,chatRow,chatBody,editCapac
 import {parseSource} from '../shared/expr.ts';
 import {presetById,roleOf} from '../shared/presets.ts';
 import {SLOTS,publishedPlan,type Plan} from '../shared/performance.ts';
-import type {AudienceSnapshot} from '../shared/studio.ts';
+import type {AudienceSnapshot,GuestPart} from '../shared/studio.ts';
 
 type Row=Record<string,any>;
 export const LIVE_LIMITS={listeners:32,reactionsPerSecond:2,chatRetentionDays:7};
@@ -87,7 +87,10 @@ export function audienceSnapshot(v:Visitor,performanceId:string):AudienceSnapsho
   // carries it, at the bar that change takes effect. Source, history,
   // provenance, drafts, members and chat are never included.
   const plans=live?plansFor(p.project_id,t.generation).map(publishedPlan):[];
-  const parts=live?rows('select t.id,t.name,t.role,t.guest_performance_id,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null order by t.position',p.project_id).map(x=>({id:x.id,name:x.name,role:roleOf(x.role),addedBy:x.handle,guest:!!x.guest_performance_id})):[];
+  const parts=live?rows('select t.id,t.owner_id,t.name,t.role,t.guest_performance_id,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null order by t.position',p.project_id).map(x=>({id:x.id,name:x.name,role:roleOf(x.role),addedBy:x.handle,ownerId:x.owner_id,guest:!!x.guest_performance_id})):[];
+  // A separate, actor-filtered editing view: never reuse the project snapshot
+  // or send another guest's verbatim source/history to this visitor.
+  const yourParts:GuestPart[]=live&&a.role==='performer'?rows("select t.id,t.name,t.role,t.preset_id,r.source_text,c.current_revision from track t join clip c on c.track_id=t.id and c.slot='A' join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where t.guest_performance_id=? and t.owner_id=? and t.archived_at is null order by t.position",p.id,v.id).map(x=>({id:x.id,name:x.name,role:roleOf(x.role),presetId:x.preset_id,source:x.source_text,revision:x.current_revision})):[];
   const performers=rows("select pp.visitor_id,pp.role,v.handle from performance_participant pp join visitor v on v.id=pp.visitor_id where pp.performance_id=? and pp.removed=0 and pp.role in ('host','performer')",p.id).map(x=>({id:x.visitor_id,handle:x.handle,role:x.visitor_id===p.host_id?'host':x.role}));
   const credits=new Map(performers.map(x=>[x.id,x]));
   for(const x of rows('select distinct t.owner_id,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null',p.project_id))if(!credits.has(x.owner_id))credits.set(x.owner_id,{id:x.owner_id,handle:x.handle,role:'composer'});
@@ -95,7 +98,7 @@ export function audienceSnapshot(v:Visitor,performanceId:string):AudienceSnapsho
   return {id:p.id,projectId:a.role==='listener'||a.role==='performer'?null:project.id,title:p.title,projectTitle:project.title,visibility:p.visibility,status:p.status,endReason:p.end_reason,
     serverNowMs:Date.now(),eventId:Number(one('select coalesce(max(id),0) as id from event where scope=?',`audience:${p.id}`)!.id),bpm,
     transport:live?{status:t.status,epochMs:t.epoch_ms,generation:t.generation}:{status:'stopped',epochMs:null,generation:t.generation},
-    plans,performers:[...credits.values()],parts,audience:here.size,capacity:LIVE_LIMITS.listeners,full,
+    plans,performers:[...credits.values()],parts,yourParts,audience:here.size,capacity:LIVE_LIMITS.listeners,full,
     you:{id:v.id,handle:handleOf(v.id),code:one('select friend_code from visitor where id=?',v.id)?.friend_code??'',role:a.role,muted:!!part?.muted,request:one('select status from performance_request where performance_id=? and visitor_id=?',p.id,v.id)?.status??null},
     ...(host?{requests:rows("select r.visitor_id,v.handle from performance_request r join visitor v on v.id=r.visitor_id where r.performance_id=? and r.status='pending' order by r.created_at",p.id).map(x=>({visitorId:x.visitor_id,handle:x.handle}))}:{}),
     hostHandle:handleOf(p.host_id)};
@@ -209,6 +212,10 @@ export function rotateListenLink(v:Visitor,performanceId:string){
 }
 // A guest performer's own temporary parts: session-scoped, counted against
 // the same twelve-part limit, never written into the project as its own.
+function guestDocument(source:string){
+  try{return parseSource(source).document;}
+  catch(e){throw new CommandError(e instanceof Error?e.message:'Invalid Strudel expression.',422);}
+}
 export function guestCommand(v:Visitor,performanceId:string,input:Row){
   const type=text(input.type,30,'a command');
   persist(v);
@@ -226,23 +233,25 @@ export function guestCommand(v:Visitor,performanceId:string,input:Row){
       let name:string,role:string|null=null,source:string,provenance:Row;
       if(typeof payload.presetId==='string'){const pr=presetById(payload.presetId);need(pr,'That sound is not in the catalogue.',404);name=pr!.name;role=pr!.role;source=pr!.source;provenance={preset:{id:pr!.id,version:pr!.version},guest:true};}
       else{source=code(payload.source);name=text(payload.name??'Guest part',40,'the part a name');provenance={via:'code',guest:true};}
-      const doc=parseSource(source).document;entityId=randomUUID();
+      const doc=guestDocument(source);entityId=randomUUID();
       const position=Number(one('select coalesce(max(position),-1)+1 as p from track where project_id=?',p.project_id)!.p);
       run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,guest_performance_id) values(?,?,?,?,?,1,null,?,?,?,?)',entityId,p.project_id,v.id,name,position,role,typeof payload.presetId==='string'?payload.presetId:null,typeof payload.presetId==='string'?1:null,p.id);
       const clipId=randomUUID();run('insert into clip values(?,?,?,1)',clipId,entityId,'A');run('insert into clip_revision values(?,1,2,?,?,?,?,?)',clipId,JSON.stringify(doc),source,JSON.stringify(provenance),v.id,now);
       for(const s of SLOTS)run('insert into scene_assignment values(?,?,?,?)',p.project_id,s,entityId,'A');
     }else{
-      const tr=one('select * from track where id=? and guest_performance_id=? and owner_id=?',payload.trackId,p.id,v.id);need(tr,'You can only change your own guest parts.',403);entityId=tr!.id;
+      const tr=one('select * from track where id=? and guest_performance_id=? and owner_id=?',payload.trackId,p.id,v.id);need(tr,'You can only change your own guest parts.',403);need(!tr!.archived_at,'This guest part has been removed. Your draft stays on this device.',410);entityId=tr!.id;
       if(type==='guest.edit'){
-        const source=code(payload.source),doc=parseSource(source).document,c=one("select * from clip where track_id=? and slot='A'",tr!.id)!;
-        if(input.expectedRevision!==undefined&&c.current_revision!==input.expectedRevision)throw new CommandError('This part changed in another tab. Your draft is safe.',409);
+        const source=code(payload.source),doc=guestDocument(source),c=one("select * from clip where track_id=? and slot='A'",tr!.id)!;
+        need(Number.isInteger(input.expectedRevision)&&input.expectedRevision>=1,'Editing needs the saved part revision.',422);
+        if(c.current_revision!==input.expectedRevision)throw new CommandError('This part changed in another tab. Your draft is safe.',409);
         run('update clip set current_revision=? where id=?',c.current_revision+1,c.id);run('insert into clip_revision values(?,?,2,?,?,?,?,?)',c.id,c.current_revision+1,JSON.stringify(doc),source,JSON.stringify({via:'code',guest:true}),v.id,now);
       }else if(type==='guest.remove')run('update track set archived_at=? where id=?',now,tr!.id);
       else throw new CommandError('Unknown command.');
     }
     const effectiveCycle=replan(p.project_id);run('update project set revision=revision+1 where id=?',p.project_id);
     audienceEvent(after,p.id,type,v.id);announce(after,v,p.project_id,type,entityId,cid,{log:{performance:p.id.slice(0,8)}});
-    const out={ok:true,commandId:cid,entityId,effectiveCycle};saveReceipt(v,cid,hash,out);return out;
+    const entityRevision=one("select current_revision from clip where track_id=? and slot='A'",entityId)?.current_revision;
+    const out={ok:true,commandId:cid,entityId,entityRevision,effectiveCycle};saveReceipt(v,cid,hash,out);return out;
   });
   return r;
 }

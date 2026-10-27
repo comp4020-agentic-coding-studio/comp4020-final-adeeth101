@@ -26,10 +26,13 @@ export type AudienceSnapshot = {
   id:string;projectId:string|null;title:string;projectTitle:string;visibility:'public'|'unlisted';status:'live'|'ended';endReason:string|null;
   serverNowMs:number;eventId:number;bpm:number;transport:{status:'stopped'|'playing';epochMs:number|null;generation:number};
   plans:Plan[];performers:{id:string;handle:string;role:string}[];
-  parts:{id:string;name:string;role:Role|'custom';addedBy:string;guest:boolean}[];
+  parts:{id:string;name:string;role:Role|'custom';addedBy:string;ownerId:string;guest:boolean}[];
+  yourParts:GuestPart[];
   audience:number;capacity:number;full:boolean;
   you:{id:string;handle:string;code:string;role:'host'|'member'|'performer'|'listener';muted:boolean;request:string|null};
   requests?:{visitorId:string;handle:string}[];
   hostHandle:string;
 };
 export type Snapshot = RoomSnapshot;
+// Exact saved source belongs only to the guest who owns this session part.
+export type GuestPart = {id:string;name:string;role:Role|'custom';presetId:string|null;source:string;revision:number};

@@ -146,6 +146,9 @@ export async function mountRoom(host:HTMLElement,id:string){
       !playing()&&(isHost()||!state.transport.hostId)&&online(),
       state.editors.youCanEdit&&online(),active().length>=12,state.settings.bpm]);
     if(!force&&key===trayKey)return;
+    const focused=el.tray.contains(document.activeElement)?document.activeElement as HTMLElement:null;
+    const focusSelector=focused?.id?`#${CSS.escape(focused.id)}`:focused?.dataset.act?
+      `[data-act="${CSS.escape(focused.dataset.act)}"]${focused.dataset.sound?`[data-sound="${CSS.escape(focused.dataset.sound)}"]`:''}${focused.dataset.role?`[data-role="${CSS.escape(focused.dataset.role)}"]`:''}`:null;
     trayKey=key;
     const p=PACKS.find(x=>x.id===pack)!;
     const list:(Preset|{id:string;name:string;role:Role|'custom';source:string;mine:true})[]=traySource==='mine'?mySounds.map(s=>({...s,mine:true as const})):p.presets.filter(x=>filter==='all'||x.role===filter);
@@ -166,6 +169,7 @@ export async function mountRoom(host:HTMLElement,id:string){
       <span class="sound-actions"><button class="ghost small" data-act="preview" data-sound="${esc(x.id)}" data-mine="${'mine' in x?1:0}" aria-pressed="${previewing===x.id}" aria-label="${previewing===x.id?'Stop preview of':'Preview'} ${esc(x.name)}">${previewing===x.id?'■':'▶'}<span class="sr-only"> preview</span></button>
       <button class="primary small" data-act="${target?'swap':'add'}" data-sound="${esc(x.id)}" data-mine="${'mine' in x?1:0}" ${state.editors.youCanEdit&&online()&&(target||active().length<12)?'':'disabled'} aria-label="${target?'Swap to':verb} ${esc(x.name)}">${target?'Swap':verb}</button></span>
     </li>`).join(''):`<li class="empty">${traySource==='mine'?'Save a part from its Code tab to keep it here.':'No sounds of that type in this pack.'}</li>`}</ul>`;
+    if(focusSelector)$<HTMLElement>(focusSelector,el.tray)?.focus({preventScroll:true});
   }
 
   // --- drawers ---------------------------------------------------------------------------
@@ -534,6 +538,9 @@ export async function mountRoom(host:HTMLElement,id:string){
     if(target){swapFor=target;void takeLease(target).then(ok=>ok&&soundFor(btn).then(({payload,name})=>command2('part.swap',{trackId:target,...payload},undefined,`Swapped to ${name} · {bar}`))).catch(fail).finally(()=>{swapFor=null;renderTray();});}
     else void addSound(btn).catch(fail);});
 
+  // Register the initial tray before the async connection/calibration starts.
+  // Finishing calibration must never take focus from a person already playing.
+  render();if(trayOpen){openLayer(el.tray,()=>{trayOpen=false;renderTray();renderStage();closeLayer(el.tray);});}
   // --- live connection, presence, clocks ----------------------------------------------------
   const live=connect(()=>`/api/projects/${id}/events?since=${state.eventId}`,{
     change:(kind)=>{
@@ -543,7 +550,7 @@ export async function mountRoom(host:HTMLElement,id:string){
       scheduleRefresh();
     },
     state:s=>{connection=s;if(s==='revoked'){toast('You no longer have access to this mix.');setTimeout(()=>location.href='/',2500);}renderHead();renderTray();if(s==='live'&&!editingSomething())renderDrawer();else drawerControls();if(s!=='live'&&!online())current()?.stopShared();syncAudio();},
-    poll:()=>refresh(),
+    poll:async()=>{await refresh();if(drawer?.kind==='people')await loadChat();},
   });
   let refreshTimer:ReturnType<typeof setTimeout>|null=null;
   function scheduleRefresh(){if(!refreshTimer)refreshTimer=setTimeout(()=>{refreshTimer=null;void refresh().catch(()=>{});},60);}
@@ -556,7 +563,7 @@ export async function mountRoom(host:HTMLElement,id:string){
   document.addEventListener('visibilitychange',()=>{if(document.hidden){current()?.stopShared();}else{beat();void refresh().then(()=>calibrate()).then(o=>{offset=o;syncAudio();}).catch(()=>{});}});
   window.addEventListener('beforeunload',()=>{if(leaseHeld)navigator.sendBeacon?.(`/api/projects/${id}/commands`,new Blob([JSON.stringify({commandId:crypto.randomUUID(),type:'part.release',payload:{trackId:leaseHeld}})],{type:'application/json'}));});
   offset=await calibrate().catch(()=>0);
-  render();if(trayOpen){openLayer(el.tray,()=>{trayOpen=false;renderTray();renderStage();closeLayer(el.tray);});}
+  syncAudio();
   (window as any).ensembleDebug={snapshot:()=>state,audio:()=>current(),live,offset:()=>offset};
   void audio;
 }

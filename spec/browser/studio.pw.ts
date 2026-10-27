@@ -79,7 +79,7 @@ test('start, invite, edit together with code, reopen, go live, listen, chat and 
   await desk.close();await phone.close();await third.close();
 });
 
-test('two people editing one part: the second keeps their draft and chooses what happens',async({browser})=>{
+test('two tabs of one identity keep a stale draft and choose what happens',async({browser})=>{
   const desk=await browser.newContext({viewport:{width:1920,height:1080}});const a=await desk.newPage();
   await a.goto('/');await a.getByRole('button',{name:'Start a mix'}).click();await a.waitForURL(/\/p\//);await a.getByRole('button',{name:'Add and play Pocket'}).click();
   await expect(a.locator('.performer[data-part]')).toHaveCount(1);

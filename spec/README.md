@@ -23,6 +23,13 @@ however you run it and `pnpm check` finds it at `APP_URL` (default
 
 ## Your checks
 
+`guest-editor.test.ts`, `chat-blocks.test.ts`, `transport-stop.test.ts` and
+`performer.test.ts` cover the remaining review findings and durable Stop/Play.
+`browser/corrections.pw.ts` exercises guest code/Shape editing, two guests with
+the same name, exact draft recovery through reload and offline/online, conflicts,
+ending with a draft, personal live chat filtering and real two-identity leases.
+The older two-tab stale-draft flow remains and is named for what it tests.
+
 Everything else in `spec/` is yours to write. Any `spec/*.test.ts` runs with
 `pnpm check`, against the same running app. Some lines of a spec only a person
 can judge; those are left to the crit and the marker.

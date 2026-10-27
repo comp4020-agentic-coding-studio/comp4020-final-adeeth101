@@ -1,5 +1,41 @@
 # Verification record
 
+## 28 October 2026: guest editing and final correction gate
+
+Node 24.21.0, production image `f562080d8d29`, limited to 256 MB with swap
+also capped at 256 MB and throwaway `/data`. Against that image:
+
+- `CI=true APP_URL=http://localhost:8381 pnpm check`: 28 files, **273 passed,
+  1 skipped** (the existing live README edit check), types and build pass.
+- Production browser suite: **15 passed**, at desktop and phone viewports.
+  Guest code/Shape, local preview, exact draft reload, offline/online recovery,
+  stale revision recovery, ending with an open draft and identical handles
+  are covered without granting project access. The new editor passes axe
+  WCAG 2 A/AA checks including contrast at both sizes and retains its draft
+  when resized mid-edit. Desktop and phone screenshots were visually checked.
+- A delayed local-draft read cannot overwrite a different guest part opened
+  meanwhile (`guest-editor-view.test.ts`). Guest source access and revision
+  regressions failed before implementation; malformed guest expressions now
+  return 422 instead of leaking a generic parser failure as HTTP 500.
+- `pnpm check:evidence` passes its mechanical presence/citation checks.
+
+The full run exposed another real keyboard race: startup opened/focused the
+tray only after clock calibration, stealing focus from a button already in
+use. Initial layer registration now precedes calibration, and necessary tray
+rebuilds restore the equivalent focused control. The deterministic delayed
+calibration case and original phone keyboard case passed three times each;
+the final complete browser run above includes both.
+
+Audio/load probes, with the same output engine and server implementation:
+24 individual presets and a 12-part combination rendered with zero clipped
+samples; loudest single peak -3.5 dBFS, combined peak -1.5 dBFS. Two local
+browsers agreed on scheduled epochs (0 ms), not measured speaker alignment.
+At normal desktop speed, 384/384 events per second were voiced, slowest pass
+11.6 ms; at 4x CPU throttling, about 216/s were voiced and the page reported
+skips. Load memory was 45.85 MiB / 256 MiB. The 32-listener cap admitted 32
+and refused the next identity. These are probes, not a listening verdict or
+a real 32-person performance.
+
 ## 28 October 2026: performer geometry
 
 High-bit seed hashes produced negative shape indices and omitted torso/mouth

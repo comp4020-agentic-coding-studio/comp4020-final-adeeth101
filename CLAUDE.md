@@ -16,6 +16,7 @@ What the agent needs to carry from any of it is your call.
 - Version 1 trees (`shared/music.ts`) keep playing. Never convert between versions or approximate a part to fit a control; disable the control with a reason.
 - Check access in `src/access.ts` before reading anything. Visibility controls reading, roles control writing, friendship grants nothing. Private things answer like missing ones and are never cached.
 - Membership, leases, revisions and capacity are enforced on the server. Hosting never grants ownership; a performance role never grants membership.
+- Guest editors receive only their own exact source; guest edits require the current revision. Blocked chat is a personal view applied before pagination, without changing membership or shared history.
 - Every event has a scope; a stream reads one scope. A mutation and its events commit together; broadcast only after commit.
 - Shared performance follows durable plans on the project's clock; editing or going live must not reset musical phase.
 - Every committed change and every refused command logs who did what via `logAction`. Never log code, chat text, tokens, recovery codes or cookies.
