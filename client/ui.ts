@@ -21,3 +21,17 @@ export function closeLayer(el:HTMLElement){const i=stack.findIndex(x=>x.el===el)
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&stack.length){const top=stack.at(-1)!;e.preventDefault();top.close();}});
 export const visibilityLabel:Record<string,string>={private:'Private',unlisted:'Unlisted',public:'Public'};
 export const visibilityHelp:Record<string,string>={private:'Only members can open it.',unlisted:'Anyone with the view link can listen to the saved mix.',public:'Anyone can find it and listen to the saved mix.'};
+// A confirmation that names what will happen. With `typed`, the person has to
+// enter that exact text first, for the things that cannot be undone casually.
+export function confirmDialog(o:{title:string;body:string;confirm:string;danger?:boolean;typed?:string}):Promise<boolean>{
+  return new Promise(resolve=>{
+    const d=document.createElement('dialog');d.className='confirm paper';d.setAttribute('aria-labelledby','confirm-title');
+    d.innerHTML=`<h2 id="confirm-title">${esc(o.title)}</h2><p>${o.body}</p>${o.typed?`<label for="confirm-typed">Type <strong>${esc(o.typed)}</strong> to confirm</label><input id="confirm-typed" type="text" autocomplete="off" spellcheck="false">`:''}<div class="row" style="margin-top:14px"><button type="button" class="${o.danger?'danger solid':'primary'}" data-yes ${o.typed?'disabled':''}>${esc(o.confirm)}</button><button type="button" class="ghost" data-no autofocus>Cancel</button></div>`;
+    const finish=(answer:boolean)=>{d.close();d.remove();resolve(answer);};
+    d.querySelector('[data-yes]')!.addEventListener('click',()=>finish(true));
+    d.querySelector('[data-no]')!.addEventListener('click',()=>finish(false));
+    d.addEventListener('cancel',e=>{e.preventDefault();finish(false);});
+    d.querySelector<HTMLInputElement>('#confirm-typed')?.addEventListener('input',e=>{d.querySelector<HTMLButtonElement>('[data-yes]')!.disabled=(e.target as HTMLInputElement).value!==o.typed;});
+    document.body.append(d);d.showModal();
+  });
+}

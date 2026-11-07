@@ -16,3 +16,9 @@ export const codeKey=(visitor:string,project:string,part:string,slot:string)=>`v
 export const readCode=(key:string)=>get<CodeDraft>('ensemble-drafts','code',key);
 export const writeCode=(key:string,value:CodeDraft)=>put('ensemble-drafts','code',key,value);
 export const deleteCode=(key:string)=>del('ensemble-drafts','code',key);
+// A character in the creator, kept on this device until it is saved.
+export type CharacterDraft={name:string;role:string|null;look:unknown;source:string;level:number;baseRevision:number;savedAt:number};
+export const characterKey=(visitor:string,id:string)=>`character:${visitor}:${id}`;
+export const readCharacterDraft=(key:string)=>get<CharacterDraft>('ensemble-drafts','code',key);
+export const writeCharacterDraft=(key:string,value:CharacterDraft)=>put('ensemble-drafts','code',key,value);
+export const deleteCharacterDraft=(key:string)=>del('ensemble-drafts','code',key);

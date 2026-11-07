@@ -24,6 +24,8 @@ async function route(){
   if(view==='discover'){const {mountDiscover}=await import('./pages.ts');return mountDiscover(app);}
   if(view==='friends'){const {mountFriends}=await import('./pages.ts');return mountFriends(app);}
   if(view==='invite'){const {mountInvite}=await import('./pages.ts');return mountInvite(app,app.dataset.invitation!);}
+  if(view==='characters'){const {mountLibrary}=await import('./library.ts');return mountLibrary(app);}
+  if(view==='character'){const {mountCharacter}=await import('./library.ts');return mountCharacter(app,app.dataset.character!);}
   if(view==='room'){const {mountRoom}=await import('./room.ts');return mountRoom(app,app.dataset.project!);}
   if(view==='audience'){const {mountAudience}=await import('./audience.ts');return mountAudience(app,app.dataset.performance!);}
 }
