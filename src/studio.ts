@@ -405,6 +405,14 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
     case 'transport.stop':{need(t.status==='playing','The mix is already stopped.',409);need(isHost||owner,'Only the host stops the shared mix.',403);stopTransport(id,t,settings.bpm,now);entityRevision=t.revision+1;audience=true;break;}
     case 'tempo.set':{host();need(t.status==='stopped','Stop the mix before changing tempo.',409);need(Number.isInteger(payload.bpm)&&payload.bpm>=60&&payload.bpm<=180,'Tempo is 60–180 BPM.');run('update project_settings set bpm=?,settings_revision=settings_revision+1 where project_id=?',payload.bpm,id);plan();break;}
     case 'scene.rename':{host();const names=JSON.parse(settings.scene_names_json);names[slot(payload.scene)]=text(payload.name,30,'the scene a name');run('update project_settings set scene_names_json=?,settings_revision=settings_revision+1 where project_id=?',JSON.stringify(names),id);break;}
+    // A whole shape at once: who plays in each section, and the sequence. One
+    // transaction, so nobody ever hears it half applied.
+    case 'sections.apply':{
+      host();const next=arrangement(payload.arrangement),given=payload.assignments;
+      need(given&&typeof given==='object'&&SLOTS.every(s=>given[s]&&typeof given[s]==='object'&&Object.keys(given[s]).length<=ROOM_LIMITS.parts),'Say who plays in each section.');
+      for(const s of SLOTS)for(const [trackId,clip] of Object.entries(given[s]))run('update scene_assignment set clip_slot=? where project_id=? and scene=? and track_id=?',clip===null?null:slot(clip),id,s,part(trackId,true).id);
+      run('update project_settings set arrangement_json=?,settings_revision=settings_revision+1 where project_id=?',JSON.stringify(next),id);plan();break;
+    }
     case 'arrangement.save':{host();run('update project_settings set arrangement_json=?,settings_revision=settings_revision+1 where project_id=?',JSON.stringify(arrangement(payload)),id);break;}
     case 'scene.launch':case 'arrangement.start':case 'arrangement.stop':{
       host();

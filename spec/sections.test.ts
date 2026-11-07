@@ -4,6 +4,7 @@
 import {describe,it,expect,inject} from 'vitest';
 import {visitor,get,post,act,mix,room,join,type V} from './helpers.ts';
 import {resolvePlan,planAt,sceneAt,publishedPlan} from '../shared/performance.ts';
+import {suggestSections} from '../shared/sections.ts';
 const base=inject('baseUrl');
 const sequence={entries:[{scene:'A',bars:8},{scene:'B',bars:4},{scene:'C',bars:4}],loop:false};
 const two=async(a:V)=>{const id=await mix(a);const kick=(await act(a,id,'part.add',{presetId:'warm-pocket'})).body.entityId,bass=(await act(a,id,'part.add',{presetId:'warm-anchor'})).body.entityId;return {id,kick,bass};};
@@ -74,5 +75,27 @@ describe('running a sequence',()=>{
     expect(p.arrangement.entries).toHaveLength(2);expect(Object.keys(p.catalog).sort()).toEqual([kick,bass].sort());
     expect(p.sceneAssignments.D).toEqual({});
     expect(JSON.stringify(publishedPlan((await room(a,id)).plans.at(-1)))).toEqual(JSON.stringify(p));
+  });
+});
+describe('suggesting a build-up',()=>{
+  const band=[{id:'k',name:'Kick',role:'beats'},{id:'b',name:'Bass',role:'bass'},{id:'m',name:'Tune',role:'melody'},{id:'t',name:'Pad',role:'texture'}];
+  it('is arithmetic on roles: the same band always gets the same answer, and it uses only who is there',()=>{
+    expect(suggestSections(band)).toEqual(suggestSections(band));
+    const s=suggestSections(band);
+    expect(s.who).toEqual({A:['Tune','Pad'],B:['Bass','Tune','Pad'],C:['Kick','Bass','Tune','Pad'],D:['Kick','Pad']});
+    expect(new Set(Object.values(s.assignments).flatMap(x=>Object.keys(x)))).toEqual(new Set(['k','b','m','t']));
+  });
+  it('never leaves a section empty, whatever the band',()=>{
+    for(const only of ['beats','bass','melody','texture','custom'])for(const who of Object.values(suggestSections([{id:'x',name:'Solo',role:only}]).who))expect(who).toEqual(['Solo']);
+  });
+  it('applies as one change, for the host only, and everyone gets it from the plan',async()=>{
+    const a=await visitor(base),b=await visitor(base),{id,kick,bass}=await two(a);await join(a,b,id);
+    const s=await room(a,id),suggestion=suggestSections(s.parts);
+    expect((await act(b,id,'sections.apply',{assignments:suggestion.assignments,arrangement:suggestion.arrangement})).status).toBe(403);
+    const r=await act(a,id,'sections.apply',{assignments:suggestion.assignments,arrangement:suggestion.arrangement});expect(r.status).toBe(200);
+    const after=await room(b,id);expect(after.settings.arrangement).toEqual(suggestion.arrangement);
+    expect(after.plans.at(-1).sceneAssignments.B[kick]).toBeNull();expect(after.plans.at(-1).sceneAssignments.C[kick]).toBe('A');expect(after.plans.at(-1).sceneAssignments.D[bass]).toBeNull();
+    expect((await act(a,id,'sections.apply',{assignments:{A:{}},arrangement:suggestion.arrangement})).status).toBe(422);
+    expect((await act(a,id,'sections.apply',{assignments:{A:{nope:'A'},B:{},C:{},D:{}},arrangement:suggestion.arrangement})).status).toBe(404);
   });
 });

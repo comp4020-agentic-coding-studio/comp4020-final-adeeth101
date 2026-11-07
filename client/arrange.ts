@@ -17,6 +17,7 @@ export type ArrangeHost={
   // Local only: hears a section's characters without changing the mix.
   hear:(scene:Slot)=>Promise<boolean>;hearing:()=>Slot|null;
   rename:(scene:Slot,name:string)=>void;
+  suggest:()=>void;
 };
 const label=(name:string)=>name.replace(/^[A-D] · /,'');
 const MAX_ENTRIES=8,MAX_BARS=16;
@@ -74,7 +75,7 @@ export class ArrangeStrip{
         ${running?`<button class="primary small" data-ar="stop" ${host?'':'disabled'}${hostHint}>Stop sequence</button>`:`<button class="primary small" data-ar="run" ${host||!s.transport.hostId?'':'disabled'}${hostHint}>Run sequence</button>`}
       </div>
       <div class="section-tiles">${tiles}</div>${picker}
-      <div class="row"><strong class="small">Sequence · ${total} bars</strong><label class="radio small" style="min-height:0"><input type="checkbox" id="arrange-loop" data-ar="loop" ${a.loop?'checked':''} ${host?'':'disabled'}> Loop</label>${a.entries.length<MAX_ENTRIES?`<label class="sr-only" for="arrange-add">Add a section to the sequence</label><select id="arrange-add" ${host?'':'disabled'}><option value="">Add a section…</option>${SLOTS.map(x=>`<option value="${x}">${esc(this.nameOf(x))}</option>`).join('')}</select>`:''}
+      <div class="row"><strong class="small">Sequence · ${total} bars</strong><button class="outline small" data-ar="suggest" ${host&&this.parts().length?'':'disabled'}${hostHint}>Suggest a build-up</button><label class="radio small" style="min-height:0"><input type="checkbox" id="arrange-loop" data-ar="loop" ${a.loop?'checked':''} ${host?'':'disabled'}> Loop</label>${a.entries.length<MAX_ENTRIES?`<label class="sr-only" for="arrange-add">Add a section to the sequence</label><select id="arrange-add" ${host?'':'disabled'}><option value="">Add a section…</option>${SLOTS.map(x=>`<option value="${x}">${esc(this.nameOf(x))}</option>`).join('')}</select>`:''}
         <span class="small muted">${!host?`Only the host changes the sequence. Anyone in the mix can choose who plays.`:running&&!matches?'Saved. The sequence playing now is the earlier version; run it again to use this one.':running?'Saved, and this is what is running.':playing?'Saved. Press Run sequence to start it at the next bar.':'Saved. Run sequence starts it from bar one.'}</span></div>
       <ol class="timeline" aria-label="Sequence">${timeline}</ol>`;
     if(focus)this.root.querySelector<HTMLElement>(focus)?.focus({preventScroll:true});
@@ -109,6 +110,7 @@ export class ArrangeStrip{
       case 'launch':await this.host.command('scene.launch',{scene});return;
       case 'hear':await this.host.hear(scene);this.render(true);return;
       case 'rename':this.host.rename(scene,this.nameOf(scene));return;
+      case 'suggest':this.host.suggest();return;
       case 'run':await this.host.run();return;
       case 'stop':await this.host.command('arrangement.stop',{});return;
       case 'loop':await this.save(x=>{x.loop=(b as HTMLInputElement).checked;});return;

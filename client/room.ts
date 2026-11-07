@@ -11,6 +11,7 @@ import {PatternEditor} from './pattern-editor.ts';
 import {openCreator,blankCharacter,type CreatorStart} from './creator.ts';
 import {ArrangeStrip} from './arrange.ts';
 import {ReactionStage} from './reactions.ts';
+import {suggestSections} from '../shared/sections.ts';
 import {PACKS,PRESETS,ROLE_LABEL,ROLES,presetById,type Preset,type Role} from '../shared/presets.ts';
 import {parseSource,shapeState,applyShape,CONTROL_RANGE,type Control} from '../shared/expr.ts';
 import {cycleAt,planAt,resolvePlan,type Slot} from '../shared/performance.ts';
@@ -111,6 +112,7 @@ export async function mountRoom(host:HTMLElement,id:string){
     command:async(type,payload,rev)=>{await cmd(type,payload,rev);await refresh();},
     run:async()=>{await turnSoundOn();if(playing())await cmd('arrangement.start');else await cmd('transport.start',{arrangement:true},state.transport.revision);await refresh();say('Sequence running.');},
     hear:hearSection,hearing:()=>previewing?.startsWith('section:')?previewing.slice(8) as Slot:null,
+    suggest:()=>suggestDialog(),
     rename:(scene,name)=>{dialog('Rename section',`<label for="section-name">Name</label><input id="section-name" name="name" maxlength="30" required value="${esc(name)}" autofocus><div class="row"><button class="primary" type="submit">Rename</button></div>`,async f=>{await command2('scene.rename',{scene,name:new FormData(f).get('name')},undefined,'Renamed.');});},
   });
   el.volume.value=String(deviceVolume());
@@ -335,7 +337,7 @@ export async function mountRoom(host:HTMLElement,id:string){
     el.drawer.innerHTML=`<div class="drawer-head"><h2 id="drawer-title">Chat and people</h2><button class="ghost close" data-act="close-drawer" aria-label="Close">✕</button></div>
       <ul class="people">${state.members.map(m=>`<li><span class="dot ${here.has(m.id)?'here':m.online?'online':''}" aria-hidden="true"></span><strong>${esc(m.handle)}</strong><span class="code-tag">#${esc(m.code)}</span> <span class="small muted">${m.role==='owner'?'owner':'member'}${m.id===state.transport.hostId?' · host':''}${here.has(m.id)?' · here':m.online?' · online':''}${m.id===you().id?' · you':''}</span>
         ${owner()&&m.role!=='owner'?`<button class="ghost small" data-act="member-remove" data-id="${m.id}">Remove</button>`:''}${isHost()&&m.id!==you().id?`<button class="ghost small" data-act="host-pass" data-id="${m.id}">Make host</button>`:''}</li>`).join('')}</ul>
-      <p class="small muted">The <strong>owner</strong> decides who is in the mix and who can see it. Any <strong>member</strong> can add and edit characters. The <strong>host</strong> runs Play, tempo, sections and going live; hosting moves between members and never changes who owns the mix.</p>
+      <p class="small muted">The <strong>owner</strong> decides who is in the mix and who can see it. Any <strong>member</strong> can add and edit characters. The <strong>host</strong> runs Play, tempo, sections and going live; hosting moves between members and never changes who owns the mix. A <strong>guest</strong> in a live performance can only change the characters they brought, and only while it lasts.</p>
       ${!state.transport.hostId?'<p class="small"><button class="outline small" data-act="host-claim">Become host</button> Nobody is hosting right now.</p>':''}
       ${!owner()?'<p class="small"><button class="ghost small" data-act="leave">Leave this mix</button></p>':''}
       <section class="chat" aria-label="Project chat"><h3>Chat <span class="small muted">· members only</span></h3>
@@ -390,6 +392,15 @@ export async function mountRoom(host:HTMLElement,id:string){
       async form=>{const fd=new FormData(form);const r=await request(`/api/projects/${id}/go-live`,{commandId:crypto.randomUUID(),title:fd.get('title'),visibility:fd.get('visibility')});await refresh();toast('You are live.');goLiveAfter(r.id);});
   }
   function goLiveAfter(_perf:string){setTimeout(goLiveDialog,50);}
+  // Shows a suggested shape in words first; nothing changes until Use this.
+  function suggestDialog(){
+    const s=suggestSections(active()),names=state.settings.sceneNames,short=(x:Slot)=>names[x].replace(/^[A-D] · /,'');
+    dialog('Suggest a build-up',`<p class="small">A shape worked out from who is on stage: quieter characters open, the bass arrives, the beat lands, then it thins out. It uses only what is already in this mix, and you can change anything afterwards.</p>
+      <ul class="invite-list">${(['A','B','C','D'] as const).map(x=>`<li><strong>${esc(short(x))}</strong> <span class="small">${esc(s.who[x].join(', '))}</span></li>`).join('')}</ul>
+      <p class="small"><strong>Sequence:</strong> ${s.arrangement.entries.map(e=>`${esc(short(e.scene))} ${e.bars}`).join(' → ')} bars, then it rests on the last section. This replaces the sections and sequence you have now.</p>
+      <div class="row"><button class="primary" type="submit">Use this</button><button type="button" class="ghost" data-act="dialog-close">Cancel</button></div>`,
+      async()=>{await command2('sections.apply',{assignments:s.assignments,arrangement:s.arrangement},undefined,'Sections and sequence updated. Press Run sequence to hear them.');});
+  }
 
   // Saving needs the server. When the connection drops or returns, the open
   // drawer's save buttons follow in place, so drafts and focus are untouched.
