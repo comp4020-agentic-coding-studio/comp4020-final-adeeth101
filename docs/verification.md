@@ -1,5 +1,52 @@
 # Verification record
 
+## 7 November 2026: reaching things on a phone, and one set of clothes
+
+Three reported faults, reproduced at 390×844 in a real browser before any change
+was made, by measuring every element on the page rather than by eye.
+
+| Reported | What the measurement showed |
+| --- | --- |
+| "on phone you still have to do horizontal scroll" | The page itself never scrolled sideways, but five regions inside it did. The creator's tab strip was 651 px inside 366 px, so Colours, Music and Details sat off the side. The step grid was 614 px inside 364 px. The sections strip, the sequence and the cast's filter chips were the same shape of problem. |
+| "any hyperlinks are hard to click" | The header, the footer and the plain links on Play, the audience view, Characters and the mix sheets were bare text, some 16 px tall, against a 44 px target everywhere else in the app. |
+| "the previous pages don't match the theme" | `/readme`, `/legacy` and `/archive` loaded a different stylesheet: system type on near-white, no header, no footer, and their own four-colour kit. |
+
+### What changed
+
+- **The grid is cut into blocks of eight steps on a narrow screen.** Every cell
+  keeps its real column number, so the source, the keyboard, the playhead and
+  the step a person presses are the same in either layout; only how many sit on
+  one line changes. Turning the phone redraws it. A wide screen is unchanged:
+  one line of sixteen, as before.
+- Tab strips, section tiles, the sequence and the filter chips wrap instead of
+  scrolling. The creator's preview is bounded by the screen it is on.
+- Every destination is a bordered control of at least 44 by 44: the header, the
+  footer, and the links in the mixes, audience, character and invitation views.
+  A link inside a sentence stays a link, with a thicker underline.
+- The written pages and the sketchpad load `studio.css` and share the header and
+  footer, with their content on a cream sheet on the violet wall. `style.css`
+  now holds only what those pages have and the stage does not, and takes its
+  colours from the same tokens, so the two cannot drift apart again.
+
+### Checks
+
+| Check | Result |
+| --- | --- |
+| `pnpm check` | 515 tests in 36 files passed |
+| `pnpm test:browser` | 43 flows passed, on production assets against an isolated database |
+| `pnpm check:evidence` | Passed |
+| `spec/browser/reach.pw.ts` (new) | 6 flows. Against the previous build 5 of the 6 fail, naming `div#creator-tabs.creator-tabs has to be dragged sideways (651 inside 366)` and `div.grid-scroll has to be dragged sideways (614 inside 364)` |
+| axe, WCAG 2 A and AA | Clean on `/readme`, `/legacy` and `/archive` at 1920×1080 and 390×844 |
+
+The new flows fail on three separate things, so a later change cannot quietly
+lose one of them: the page scrolling sideways, a region inside it that really
+does scroll sideways, and anything a person must read or press sitting outside
+the window. Decoration that bleeds behind a clip is allowed, because nobody has
+to reach it.
+
+Not measured: a real phone, and whether blocks of eight read as one bar to a
+person who did not build them. Both still need people.
+
 ## 7 November 2026: four-bar editor recovery
 
 A reported creator failure was reproduced before changing the code: lengthening

@@ -70,6 +70,7 @@ Against the running app (`APP_URL`), unless noted:
 | `migration-characters.test.ts` | Own server on `fixtures/ensemble-v2.db`, written by the previous release over HTTP: every row kept, sounds become characters, verified backup |
 | `browser/journey.pw.ts` | The whole creative journey across three browsers and a server restart: create, draw, write music on the grid and in code, save, share, collaborate, resolve a conflict, perform, react, arrange, export real audio, unlist, restart |
 | `browser/creative.pw.ts` | Grid and code as one truth, keyboard use, focus through background updates, an export that leaves playback alone, deletion and accessibility of the new surfaces at both viewports |
+| `browser/reach.pw.ts` | On a phone: nothing reached by dragging the page or a strip inside it sideways, every step of a bar on screen and editable, every destination a 44×44 button, and the written pages wearing the same clothes as the stage |
 | `browser/*.pw.ts` | The whole journey across three browsers at 1920×1080 and 390×844, conflicts, keyboard-only use with axe, refused audio, polling fallback, losing the server |
 
 `helpers.ts` holds the shared HTTP helpers and is not a test.
