@@ -37,7 +37,9 @@ type Options={
 };
 
 export async function openCreator(start:CreatorStart,options:Options){
-  const key=characterKey(options.visitorId,start.id??'new');
+  // Each starting point keeps its own draft, so an abandoned blank character never
+  // turns up when someone opens a remix.
+  const key=characterKey(options.visitorId,start.id??start.from?.presetId??start.from?.characterId??`new:${start.role??'none'}`);
   let name=start.name,role=start.role,look={...start.look},source=start.source,level=start.level,revision=start.revision??0,characterId=start.id??null;
   let tab:Tab=options.lookOnly?'body':'body',music:'steps'|'code'='steps',savedSnapshot=JSON.stringify({name,role,look,source,level}),previewing=false,saving=false,conflict:SavedCharacter|null=null,codeError:string|null=null;
   const original=structuredClone({name,role,look,source,level});

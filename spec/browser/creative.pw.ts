@@ -4,7 +4,8 @@
 // interface at both marking viewports.
 import {test,expect,type Page,type Browser} from '@playwright/test';
 
-const snapshot=(page:Page)=>page.evaluate(()=>(window as any).ensembleDebug.snapshot());
+// The stage draws before clock calibration finishes and installs this probe.
+const snapshot=async(page:Page)=>{await page.waitForFunction(()=>(window as any).ensembleDebug);return page.evaluate(()=>(window as any).ensembleDebug.snapshot());};
 const noSideScroll=(page:Page)=>page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth);
 async function mix(browser:Browser,viewport={width:1920,height:1080},options={}){
   const context=await browser.newContext({viewport,...options}),page=await context.newPage();
@@ -228,5 +229,46 @@ test('searching the cast finds characters across packs, and a blank character ca
     await page.getByRole('button',{name:'Save and add to mix'}).click();
     await expect(page.locator('.performer[data-part]')).toHaveCount(1);
     expect((await snapshot(page)).parts[0].clips.A.source).toMatch(/^s\("bd ~ ~ ~ sd ~/);
+  }finally{await context.close();}
+});
+
+test('a track’s look changes for this mix only, a track can be saved, and Solo is personal',async({browser})=>{
+  const {context,page}=await mix(browser);
+  try{
+    await add(page,'Pocket');await add(page,'Anchor');await expect(page.locator('.performer[data-part]')).toHaveCount(2);await page.getByRole('button',{name:'Close the cast'}).click();
+    await page.locator('.performer[data-part] .performer-btn').first().click();
+    await page.getByRole('button',{name:'Change look'}).click();await expect(page.getByRole('tab',{name:'Music'})).toHaveCount(0);
+    await page.getByRole('button',{name:'Octopus',exact:true}).click();await page.getByRole('button',{name:'Use this look'}).click();
+    await expect(page.locator('.performer[data-part] .figure').first()).toHaveAttribute('data-body','octo');
+    expect((await snapshot(page)).parts[0].look.body).toBe('octo');
+    await page.getByRole('button',{name:'Save to my characters'}).click();await expect(page.locator('#toast')).toContainText('saved in your characters');
+    await page.getByRole('button',{name:'Solo for me'}).click();await expect(page.locator('#status-line')).toContainText('Only you hear');
+    const plan=(await snapshot(page)).plans.at(-1);expect(Object.values(plan.mix).every((m:any)=>!m.mute)).toBe(true);
+    await page.goto('/characters');await expect(page.getByRole('button',{name:'Edit Pocket'})).toBeVisible();await expect(page.locator('.char-card')).toContainText('remix of Pocket by Ensemble');
+  }finally{await context.close();}
+});
+
+test('unsaved creator work comes back after a reload, and only for the character it belongs to',async({browser})=>{
+  const context=await browser.newContext({viewport:{width:1280,height:800}}),page=await context.newPage();
+  try{
+    await page.goto('/characters?new=1');await page.getByRole('button',{name:'Bass',exact:true}).click();
+    await page.getByRole('button',{name:'Octopus',exact:true}).click();await page.getByRole('tab',{name:'Details'}).click();await page.locator('#creator-name-input').fill('Half finished');await page.waitForTimeout(400);
+    await page.reload();await page.getByRole('tab',{name:'Factory cast'}).click();await page.getByRole('button',{name:'Remix Gatekeeper'}).click();
+    await expect(page.locator('#creator-name')).toHaveText('Gatekeeper remix');await page.getByRole('button',{name:'Close the creator'}).click();
+    await page.getByRole('button',{name:'Create character'}).click();await page.getByRole('dialog').getByRole('button',{name:'Bass',exact:true}).click();
+    await expect(page.locator('#creator-name')).toHaveText('Half finished');await expect(page.locator('#creator-preview .figure')).toHaveAttribute('data-body','octo');
+  }finally{await context.close();}
+});
+
+test('a suggested build-up is shown in words first, and only Use this changes anything',async({browser})=>{
+  const {context,page}=await mix(browser);
+  try{
+    await add(page,'Pocket');await add(page,'Anchor');await add(page,'Sunbeam');await add(page,'Glow');await expect(page.locator('.performer[data-part]')).toHaveCount(4);await page.getByRole('button',{name:'Close the cast'}).click();
+    await page.getByRole('button',{name:'Sections'}).click();const before=(await snapshot(page)).settings.arrangement;
+    await page.getByRole('button',{name:'Suggest a build-up'}).click();await expect(page.getByRole('dialog')).toContainText('Sunbeam, Glow');
+    await page.getByRole('dialog').getByRole('button',{name:'Cancel'}).click();expect((await snapshot(page)).settings.arrangement).toEqual(before);
+    await page.getByRole('button',{name:'Suggest a build-up'}).click();await page.getByRole('button',{name:'Use this'}).click();
+    await expect.poll(async()=>(await snapshot(page)).settings.arrangement.entries.length).toBe(6);
+    await expect(page.locator('.timeline li')).toHaveCount(6);
   }finally{await context.close();}
 });

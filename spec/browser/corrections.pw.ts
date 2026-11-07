@@ -100,7 +100,12 @@ test('a guest customises only their own part, recovers drafts and resolves confl
     for(let i=0;i<10;i++)await g.locator('#guest-shape-gain').press('ArrowLeft');
     await g.getByRole('button',{name:'Apply to mix',exact:true}).click();
     await expect.poll(async()=>(await get(x.audience,`/api/performances/${x.perf}`)).yourParts[0].source).toContain('.gain(0.9)');
-    await g.getByRole('tab',{name:'Code',exact:true}).click();await code.fill('s("bd*2 cp")');
+    // The step grid edits the same draft, for a guest as for a member.
+    await g.getByRole('tab',{name:'Pattern',exact:true}).click();
+    await g.locator('.cell[data-note="48"][data-c="4"]').click();await expect(g.getByRole('button',{name:'Apply to mix',exact:true})).toBeEnabled();
+    await g.getByRole('tab',{name:'Code',exact:true}).click();
+    const edited=await code.inputValue();expect(edited).toContain('// Guest precision');expect(edited).toContain('.gain(0.9)');expect(edited).not.toContain('a2 ~ [c3 e3] ~');
+    await code.fill('s("bd*2 cp")');
     const now=(await get(x.audience,`/api/performances/${x.perf}`)).yourParts[0];
     await post(x.audience,`/api/performances/${x.perf}/commands`,{commandId:crypto.randomUUID(),type:'guest.edit',expectedRevision:now.revision,payload:{trackId:own.id,source:'s("hh*4")'}});
     await expect(g.getByRole('alert')).toContainText('changed in another tab');await expect(code).toHaveValue('s("bd*2 cp")');

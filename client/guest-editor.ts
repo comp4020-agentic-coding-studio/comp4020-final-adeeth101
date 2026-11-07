@@ -3,6 +3,7 @@
 import {request,type ApiError} from './api.ts';
 import {esc,on,errorText,toast} from './ui.ts';
 import {readCode,writeCode,deleteCode,codeKey,type CodeDraft} from './drafts.ts';
+import {PatternEditor} from './pattern-editor.ts';
 import {parseSource,shapeState,applyShape,CONTROL_RANGE,type Control} from '../shared/expr.ts';
 import {presetById} from '../shared/presets.ts';
 import type {GuestPart} from '../shared/studio.ts';
@@ -21,18 +22,28 @@ export class GuestEditor {
   private saving=false;
   private error:string|null=null;
   private notice='';
-  private tab:'code'|'shape'='code';
+  private tab:'code'|'pattern'|'shape'='code';
+  private patternRoot=document.createElement('div');
+  private pattern:PatternEditor;
   private writes:Promise<void>=Promise.resolve();
   private pending:{commandId:string;source:string;revision:number}|null=null;
   private openRun=0;
   previewId:string|null=null;
 
   constructor(private dialog:HTMLDialogElement,private visitorId:string,private performanceId:string,private hooks:Hooks){
+    // The same step editor as the room, on this guest's own draft.
+    this.pattern=new PatternEditor(this.patternRoot,{
+      source:()=>this.draft?.source??'',
+      change:next=>{if(!this.draft)return;this.draft.source=next;this.pending=null;this.notice='';this.validate();this.store();this.renderState();if(this.previewId&&!this.error)void hooks.preview(next,this.previewId).catch(()=>{});},
+      editable:()=>this.available&&!this.saving&&this.parts.some(p=>p.id===this.part?.id),
+      readOnlyReason:()=>this.reason||'You can’t change this right now.',
+      gotoCode:()=>{this.tab='code';this.render();},
+    });
     dialog.addEventListener('close',()=>this.stopPreview());
     on(dialog,'click','[data-guest-action]',async b=>{
       const action=b.dataset.guestAction!;
       if(action==='close'){dialog.close();return;}
-      if(action==='tab'){this.tab=b.dataset.tab as 'code'|'shape';this.render();return;}
+      if(action==='tab'){this.tab=b.dataset.tab as 'code'|'pattern'|'shape';this.render();return;}
       if(action==='copy'){await navigator.clipboard.writeText(this.draft?.source??'');toast('Draft code copied.');return;}
       if(action==='preview'){
         if(this.previewId){this.stopPreview();this.renderState();return;}
@@ -92,7 +103,7 @@ export class GuestEditor {
     const run=++this.openRun;
     this.stopPreview();await this.writes;
     if(run!==this.openRun)return;
-    this.part=part;this.draft=this.fromPart(part);this.notice='';this.pending=null;
+    this.part=part;this.draft=this.fromPart(part);this.notice='';this.pending=null;this.pattern.reset();
     let saved:CodeDraft|undefined;
     try{saved=await readCode(this.key());}catch{this.notice='Local storage is unavailable. Copy your draft before leaving.';}
     if(run!==this.openRun)return;
@@ -111,12 +122,14 @@ export class GuestEditor {
       return `<div class="shape-row"><label for="guest-shape-${ctl}">${LABEL[ctl]}</label><div class="shape-input"><input id="guest-shape-${ctl}" type="range" data-guest-shape="${ctl}" data-available="${state.available}" min="${min}" max="${max}" step="${ctl==='lpf'?10:0.01}" value="${value}" ${state.available?'':'disabled'}><output>${value}${ctl==='lpf'?' Hz':ctl==='release'?' s':''}</output></div>${state.reason?`<p class="small muted">${esc(state.reason)}</p>`:''}</div>`;
     }).join('');
     this.dialog.innerHTML=`<header class="drawer-head"><div><h2 id="guest-editor-title">${esc(this.part.name)}</h2><p class="small muted">Your track · this performance only</p></div><button class="ghost close" data-guest-action="close" aria-label="Close guest editor">✕</button></header>
-      <div class="tabs" role="tablist" aria-label="Guest track views"><button role="tab" id="guest-code-tab" data-guest-action="tab" data-tab="code" aria-controls="guest-code-panel" aria-selected="${this.tab==='code'}">Code</button><button role="tab" id="guest-shape-tab" data-guest-action="tab" data-tab="shape" aria-controls="guest-shape-panel" aria-selected="${this.tab==='shape'}">Shape</button></div>
+      <div class="tabs" role="tablist" aria-label="Guest track views"><button role="tab" id="guest-code-tab" data-guest-action="tab" data-tab="code" aria-controls="guest-code-panel" aria-selected="${this.tab==='code'}">Code</button><button role="tab" id="guest-pattern-tab" data-guest-action="tab" data-tab="pattern" aria-controls="guest-pattern-panel" aria-selected="${this.tab==='pattern'}">Pattern</button><button role="tab" id="guest-shape-tab" data-guest-action="tab" data-tab="shape" aria-controls="guest-shape-panel" aria-selected="${this.tab==='shape'}">Shape</button></div>
       <div id="guest-code-panel" role="tabpanel" aria-labelledby="guest-code-tab" ${this.tab==='code'?'':'hidden'}><label for="guest-code">Strudel code</label><textarea id="guest-code" class="code-editor" spellcheck="false" autocapitalize="off" aria-describedby="guest-code-status">${esc(source)}</textarea><p class="small muted">Use s(), note().s(), stack() and supported Strudel effects. Your text is parsed, never executed as JavaScript.</p></div>
+      <div id="guest-pattern-panel" role="tabpanel" aria-labelledby="guest-pattern-tab" ${this.tab==='pattern'?'':'hidden'}></div>
       <div id="guest-shape-panel" role="tabpanel" aria-labelledby="guest-shape-tab" ${this.tab==='shape'?'':'hidden'}>${shapes}</div>
       <p id="guest-code-status" class="code-error" role="status" aria-live="polite"></p>
       <div id="guest-conflict" class="conflict" role="alert" hidden><strong>This track changed in another tab.</strong><p>Your draft is still here.</p><div class="row"><button class="outline" data-guest-action="keep">Keep my draft</button><button class="ghost" data-guest-action="load">Load current</button><button class="ghost" data-guest-action="new">Save as new track</button></div></div>
       <div class="row code-actions"><button class="outline" data-guest-action="preview">Preview on my device</button><button class="primary" data-guest-action="apply">Apply to mix</button><button class="ghost" data-guest-action="load">Restore previous</button><button class="ghost" data-guest-action="copy">Copy draft</button></div>`;
+    if(this.tab==='pattern'){this.dialog.querySelector('#guest-pattern-panel')?.append(this.patternRoot);this.pattern.render();}
     this.renderState();
   }
   private renderState(){

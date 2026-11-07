@@ -111,6 +111,7 @@ export function copyCharacter(v:Visitor,id:string,input:Row){
 export function publishCharacter(v:Visitor,id:string,input:Row){
   need(input.visibility==='public'||input.visibility==='unlisted','Choose public or unlisted.');
   need(input.confirmSource===true,'Confirm that this character’s look and code will be shared.',422);
+  limit(`publish:${v.id}`,10,0.2,'You are sharing very quickly. Try again shortly.');
   return tx(()=>{
     const c=mine(v,id),now=Date.now(),snapshot={name:c.name,role:c.role,look:parsedLook(c),source:c.source,level:c.level};
     // Moving away from a link retires it, as a mix's view link does.

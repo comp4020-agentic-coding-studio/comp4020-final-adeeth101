@@ -10,7 +10,8 @@ import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-const snapshot=(page:Page)=>page.evaluate(()=>(window as any).ensembleDebug.snapshot());
+// The stage draws before clock calibration finishes and installs this probe.
+const snapshot=async(page:Page)=>{await page.waitForFunction(()=>(window as any).ensembleDebug);return page.evaluate(()=>(window as any).ensembleDebug.snapshot());};
 const creator=(page:Page)=>page.evaluate(()=>(window as any).ensembleCreator.state());
 const cell=(page:Page,note:number,col:number)=>page.locator(`.cell[data-note="${note}"][data-c="${col}"]`);
 // The canonical WAV reader for these checks: fmt and data, then the sample level.
