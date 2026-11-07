@@ -13,7 +13,7 @@ Before any change, at `4d5f380`, on production assets and an isolated database:
 | Check | Result |
 | --- | --- |
 | `pnpm check` | 510 tests in 35 files passed |
-| `pnpm test:browser` | 33 flows passed, at 1920×1080 and 390×844 where they matter |
+| `pnpm test:browser` | 35 flows passed, at 1920×1080 and 390×844 where they matter |
 | `pnpm check:evidence` | Passed |
 | The 14-step journey, repeated | 5 of 5 after the fix described below |
 | Migration 3 | Against a database written by the previous release over HTTP: every project, track, clip, revision, member, chat, visitor, invitation, performance and saved-sound row identical; the backup verified; a second boot changes nothing |
@@ -59,6 +59,10 @@ the music stopped.
   with nothing applied, and on a real network the stream's update is often that newer
   one. This predates this work and never showed on localhost. An overtaken refresh now
   waits for the newest, and a browser flow with slowed snapshots fails without the fix.
+- **A background update could take focus from Apply.** Found by a failed CI run of the
+  keyboard flow, which had passed twice before. A control with no id was not found
+  again after a redraw, so focus fell to the page and Enter did nothing. Reproduced
+  deterministically, then fixed for every control in an open panel.
 - **A blank drum character lost its rows.** Placing the first kick removed the snare,
   hat and clap rows, because they were offered only while the kit was empty. Found by
   a browser flow.

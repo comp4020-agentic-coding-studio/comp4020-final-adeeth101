@@ -250,10 +250,13 @@ export async function mountRoom(host:HTMLElement,id:string){
   // Everything that redraws a panel goes through here, so a keyboard user keeps
   // their place when an update arrives while they are on a button or a step.
   function keepFocus(root:HTMLElement,draw:()=>void){
+    const FOCUSABLE='button,input,select,textarea,a[href],[tabindex]';
     const a=document.activeElement as HTMLElement|null,inside=a&&root.contains(a)&&a!==root?a:null,scroll=root.scrollTop;
     const selector=!inside?null:inside.id?`#${CSS.escape(inside.id)}`:inside.classList.contains('cell')?`.cell[data-grid="${inside.dataset.grid}"][data-r="${inside.dataset.r}"][data-c="${inside.dataset.c}"]`:inside.dataset.act?`[data-act="${CSS.escape(inside.dataset.act)}"]${inside.dataset.id?`[data-id="${CSS.escape(inside.dataset.id)}"]`:''}`:null;
+    // A control with nothing to name it is found again by its place in the panel.
+    const place=inside?[...root.querySelectorAll(FOCUSABLE)].indexOf(inside):-1;
     draw();root.scrollTop=scroll;
-    if(selector)$<HTMLElement>(selector,root)?.focus({preventScroll:true});
+    if(inside)((selector?$<HTMLElement>(selector,root):null)??root.querySelectorAll<HTMLElement>(FOCUSABLE)[place])?.focus({preventScroll:true});
   }
   function renderDrawer(){keepFocus(el.drawer,drawDrawer);}
   function drawDrawer(){

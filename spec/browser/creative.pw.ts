@@ -285,3 +285,37 @@ test('on a slow link, a command’s own refresh is never overtaken: going live s
     await expect(page.getByRole('dialog')).toContainText('Unlisted: anyone with the listen link');
   }finally{await context.close();}
 });
+
+test('a shared character’s text is only ever text, everywhere it appears',async({browser})=>{
+  const name='<img src=x onerror=window.pwned=1>',author=await browser.newContext(),reader=await browser.newContext({viewport:{width:1920,height:1080}});
+  try{
+    await author.request.post('/api/handle',{data:{handle:'<b onmouseover=window.pwned=1>x'}});
+    const look={v:1,body:'robot',eyes:'dots',mouth:'smile',top:'none',wear:'plain',prop:'none',skin:'mint',cloth:'cobalt',trim:'sun'};
+    const made=await (await author.request.post('/api/characters',{data:{name,role:'beats',look,source:'// <script>window.pwned=1</script>\ns("bd sd")'}})).json();
+    await author.request.post(`/api/characters/${made.id}/publish`,{data:{visibility:'public',confirmSource:true}});
+    const page=await reader.newPage();const pwned=()=>page.evaluate(()=>(window as any).pwned);
+    await page.goto('/characters');await page.getByRole('tab',{name:'Shared by others'}).click();await expect(page.locator('.char-card',{hasText:'<img src=x'}).first()).toBeVisible();expect(await pwned()).toBeUndefined();
+    await page.goto(`/c/${made.id}`);await expect(page.getByRole('heading',{level:1})).toHaveText(name);await expect(page.locator('pre.source')).toContainText('<script>');expect(await pwned()).toBeUndefined();
+    await page.getByRole('button',{name:'Save a copy'}).click();await page.waitForURL('**/characters');await expect(page.locator('.char-card').first()).toContainText('<img src=x');
+    await page.goto('/');await page.getByRole('button',{name:'Start a mix'}).click();await page.waitForURL(/\/p\//);await page.locator('#pack').selectOption('mine');
+    await page.locator('.sound-card .primary').first().click();await expect(page.locator('.performer[data-part] .nameplate')).toContainText('<img src=x');
+    await page.getByRole('button',{name:'Close the cast'}).click();await page.locator('.performer[data-part] .performer-btn').click();await expect(page.locator('#drawer-title')).toContainText('<img src=x');
+    expect(await pwned()).toBeUndefined();expect(await page.locator('img').count()).toBe(0);
+  }finally{await author.close();await reader.close();}
+});
+
+test('a background update never takes focus from a control in an open panel, whatever the control',async({browser})=>{
+  const {context,page}=await mix(browser);
+  const elsewhere=(title:string)=>page.evaluate(async([i,t])=>{await fetch(`/api/projects/${i}/commands`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({commandId:crypto.randomUUID(),type:'project.rename',payload:{title:t}})});},[(page.url().split('/p/')[1]),title]);
+  try{
+    await add(page,'Pocket');await expect(page.locator('.performer[data-part]')).toHaveCount(1);await page.getByRole('button',{name:'Close the cast'}).click();
+    await open(page,0,'Shape');const level=page.locator('#shape-level');await level.focus();for(let i=0;i<10;i++)await page.keyboard.press('ArrowLeft');
+    const apply=page.getByRole('button',{name:'Apply to mix'});await apply.focus();
+    await elsewhere('Moved while Apply had focus');await expect(page.locator('#room-title')).toHaveText('Moved while Apply had focus');
+    await expect(apply).toBeFocused();await page.keyboard.press('Enter');
+    await expect.poll(async()=>{const s=await snapshot(page);return s.plans.at(-1).mix[s.parts[0].id].gain;}).toBeLessThan(0.7);
+    // A tab, a button with no name of its own, and a settings control behave the same.
+    await page.getByRole('tab',{name:'Track'}).focus();await elsewhere('Moved while a tab had focus');await expect(page.locator('#room-title')).toHaveText('Moved while a tab had focus');await expect(page.getByRole('tab',{name:'Track'})).toBeFocused();
+  }finally{await context.close();}
+});
+
