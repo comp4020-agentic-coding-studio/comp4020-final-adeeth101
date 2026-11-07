@@ -4,7 +4,8 @@
 import {expect,it,describe} from 'vitest';
 import {mini} from '@strudel/mini';
 import * as core from '@strudel/core';
-import {parseSource,parseMini,miniBounds,exprBounds,validateExpr,shapeState,applyShape,noteValue,LIMITS} from '../shared/expr.ts';
+import {readFileSync} from 'node:fs';
+import {parseSource,parseMini,miniBounds,exprBounds,validateExpr,shapeState,applyShape,noteValue,LIMITS,DRUMS,VOICES} from '../shared/expr.ts';
 import {compileMini,compileExpr} from '../shared/compile.ts';
 import {PACKS,PRESETS} from '../shared/presets.ts';
 
@@ -96,17 +97,22 @@ describe('Shape edits only what it can keep',()=>{
 });
 
 describe('the factory catalogue',()=>{
-  it('has 24 presets: three packs of eight, two per role, stable ids',()=>{
-    expect(PACKS.map(p=>[p.id,p.suggestedBpm,p.presets.length])).toEqual([['warm-circuit',100,8],['pocket-arcade',120,8],['after-hours',80,8]]);
-    for(const p of PACKS)for(const role of ['beats','bass','melody','texture'])expect(p.presets.filter(x=>x.role===role)).toHaveLength(2);
-    expect(new Set(PRESETS.map(p=>p.id)).size).toBe(24);
+  it('keeps the first three packs exactly and grows to at least 64 characters, two per role in every pack',()=>{
+    expect(PACKS.slice(0,3).map(p=>[p.id,p.suggestedBpm,p.presets.length])).toEqual([['warm-circuit',100,8],['pocket-arcade',120,8],['after-hours',80,8]]);
+    for(const p of PACKS){expect(p.presets).toHaveLength(8);for(const role of ['beats','bass','melody','texture'])expect(p.presets.filter(x=>x.role===role)).toHaveLength(2);}
+    expect(PRESETS.length).toBeGreaterThanOrEqual(64);expect(new Set(PRESETS.map(p=>p.id)).size).toBe(PRESETS.length);
     for(const p of PRESETS){expect(p.version).toBe(1);expect(p.key).toBe('A minor');expect(p.attribution).toMatch(/No Incredibox/);expect(p.macros).toContain('gain');}
+  });
+  it('never rewrites a character that shipped in catalogue version 1',()=>{
+    const v1=JSON.parse(readFileSync('spec/fixtures/catalogue-v1.json','utf8')) as {id:string;name:string;role:string;source:string}[];
+    expect(v1).toHaveLength(24);
+    for(const old of v1)expect(PRESETS.find(p=>p.id===old.id),old.id).toMatchObject(old);
   });
   it.each(PRESETS.map(p=>[p.id,p.source]))('%s parses, stays within bounds and makes sound for 16 bars',(_id,src)=>{
     const {document,bounds}=parseSource(src);expect(bounds.onsets).toBeLessThanOrEqual(LIMITS.onsetsPerCycle);
     const pat=compileExpr(document.root),events=pat.queryArc(0,16).filter((h:any)=>h.hasOnset());
     expect(events.length).toBeGreaterThan(0);
-    for(const h of events){const v=h.value as any;expect(['bd','sd','hh','cp','sine','triangle','square','sawtooth']).toContain(v.s);if(v.note!==undefined){expect(v.note).toBeGreaterThanOrEqual(24);expect(v.note).toBeLessThanOrEqual(96);}if(v.pan!==undefined){expect(v.pan).toBeGreaterThanOrEqual(0);expect(v.pan).toBeLessThanOrEqual(1);}}
+    for(const h of events){const v=h.value as any;expect([...DRUMS,...VOICES]).toContain(v.s);if(v.note!==undefined){expect(v.note).toBeGreaterThanOrEqual(24);expect(v.note).toBeLessThanOrEqual(96);}if(v.pan!==undefined){expect(v.pan).toBeGreaterThanOrEqual(0);expect(v.pan).toBeLessThanOrEqual(1);}}
   });
   it('no two presets in a pack are the same pattern under another name',()=>{
     const sig=(src:string)=>JSON.stringify(compileExpr(parseSource(src).document.root).queryArc(0,4).filter((h:any)=>h.hasOnset()).map((h:any)=>[Number(h.whole.begin),h.value.s,h.value.note]));
