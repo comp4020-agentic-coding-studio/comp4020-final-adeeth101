@@ -1,123 +1,66 @@
 # Process overview
 
-Stream is a shared Strudel studio. A piece lives at a link; each person who opens
-it owns up to two tracks and writes them as connected blocks, an instrument grid
-or code, all over one validated musical model. Perform runs the ensemble on a
-shared clock under a leased conductor role. This document explains how I got
-from the brief to that, why I chose this stack and this way of working with an
-agent, and where the agent's mistakes ended up in the harness.
+Ensemble is an application where users create a mix together through one shared link. Users select a character and place it on the stage for the character to begin playing its sequence. Once on stage, users may modify the sound of the character, add or delete steps of the character's sequence, or directly manipulate the character's code. I wanted users with various levels of music and programming knowledge to be able to collaborate within Ensemble.
 
-## From the brief to the app
+My desire to allow multiple user collaboration was also influenced by my prior experience working with Flok as a participant in a course titled "Sound and Music Computing." All participants collaborated in a single, shared text-based code editor. Although all participants could easily overwrite another's code contributions, it was difficult to determine what portion of the code each contributor had created. I desired to provide a method for novice musicians to quickly generate a sound, while at the same time providing experienced programmers with control over their creations.
 
-The brief asked for something multi-user, real-time and good. My answer to
-"good" came from using Flok in Sound and Music Computing: a shared text buffer
-where anyone could overwrite anything and nobody could tell whose line was
-whose. So the two questions I kept returning to were "who may change what" and
-"can a newcomer make a sound without learning the language".
+## How did the project evolve?
 
-The first version (crit 8) stored code as the source of truth and derived a grid
-only from patterns the grid understood, with a restart test proving a returning
-visitor kept their contribution
-([ce24434](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/ce24434),
-[4e4a6c3](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/4e4a6c3)).
-For crit 9 I replaced that with "one model, three views": blocks, instruments and
-code all edit the same versioned tree, and code is parsed into it rather than
-run ([341df24](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/341df24),
-[27fb6cd](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/27fb6cd)).
-I also split composing from performing. Saving a clip doesn't put it on stage,
-and conducting controls transport and scenes but never grants ownership of
-anyone's clips
-([578ba1e](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/578ba1e)).
+By Crit #8, the project was called Stream. Stream allowed users to maintain their own identity within the web browser across separate visits. It maintained a shared activity record, provided a grid connected to its pattern code, and contained basic browser audio functionality. By Crit #9, the project evolved into a studio with owned tracks, block and instrument views, and a code editor. The three distinct interfaces (views) utilized the same versioned musical representation. In addition to these features, Stream provided saved performance plans and a shared clock. By Crit #10, server logs tracked who made each modification and who requested modifications that were denied.
 
-For crit 10 the question was whether I could tell people apart from the server
-alone. Ownership was already checked on the server, but stdout only said
-"listening", so I couldn't narrate a session from `flyctl logs`. Every committed
-change, refused command and first arrival in a piece now logs the person's
-handle, short id, the action and, for a track, its name and owner
-([cf626ea](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/cf626ea)).
-The decision about who may see and change what is written in `docs/contract.md`
-with its reasons.
+[341df24](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/341df24) [27fb6cd](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/27fb6cd) [cf626ea](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/cf626ea)
 
-## Why this stack
+The studio was much easier for people with prior knowledge of patterns. Some users were also looking for additional guidance when they first used it. What people wanted to do could be seen through peer requests for sound editing, exporting, creating sections and reacting. To better address this, I created a different starting point (characters on a stage) and removed Blockly. In addition to those items, by November, I had also included editable appearance options, the option to use and reuse the same characters in different mixes, and an adjustable grid that edits supported steps directly within the user's source document.
 
-The app is Node's built-in HTTP server, Node's built-in SQLite on the Fly
-volume, server-sent events for live updates, and Vite bundling Blockly, Strudel
-and the client. There is no web framework and no database server.
+[3acd15f](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/3acd15f) [97314f9](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/97314f9) [128bd70](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/128bd70)
 
-- **One machine, 256 MB, one volume.** SQLite in-process fits that exactly: no
-  second service to run, and a transaction is the unit that keeps a change and
-  its announcing event together. The cost is a single writer and no horizontal
-  scaling, which a room of twelve people doesn't need. Load measurements kept
-  the server under 40 MB with sixty live streams
-  ([9d5f553](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/9d5f553)).
-- **SSE over WebSockets.** Changes go up as ordinary POST commands with
-  ownership and revision checks, and come down as small invalidations that tell
-  the page to refetch. SSE replays from `Last-Event-ID` after a reconnect, gets
-  through Fly's proxy without configuration, and doesn't need a second protocol
-  for writes. The cost is a refetch per change, which is cheap at this scale.
-- **No framework.** The routing table is one file and each handler lives in its
-  own module, so parallel agent branches rarely touched the same file. The cost
-  is hand-written HTML strings, where every interpolated value has to be
-  escaped by hand.
-- **Parse, don't evaluate.** Strudel normally runs code as JavaScript. Running
-  someone else's code in my browser, on a page that can act for me, is not
-  acceptable, so Acorn parses submitted code into a closed grammar on both
-  client and server. The cost is a smaller musical vocabulary, and anything
-  outside it stays a local draft.
+## What specific design decisions did I make regarding the technology used in Ensemble?
 
-The rejected options: a hosted real-time backend would have hidden the
-ownership rules in someone else's permission language; Postgres would have
-been a second machine for no benefit.
+For the purpose of simplicity, I decided to utilize Node.js's built-in HTTP server and SQLite on a Fly volume. As such, all aspects of the server and related data storage existed within one small machine. When a change is submitted via the client-side interface, a database transaction will save both the change and the corresponding event simultaneously. However, there are some trade-offs involved with making these two components operate together as efficiently as possible. For example, only one database writer can operate at a time, and changes to the document structure require migrations. Furthermore, utilizing Server-Sent Events (SSE), clients receive notifications when relevant data has been modified. Clients retrieve updated snapshot representations of the current state. To facilitate successful connection recovery, SSE necessitates support for event recovery, maintaining order among events, and implementing access restrictions. Additionally, when a user loses access rights to certain information, they should no longer receive any private update communications.
 
-## How I worked with the agent
+Each browser uses a common clock and shared plans to compile and play Strudel patterns. Therefore, each device does not need to download audio streams from the server. Each device can still have a different output delay. Since the submitted pattern code must go through a restricted parser rather than be allowed to run as free-form JavaScript, this severely restricts the features of Strudel that can be utilized within the application. However, since the parsing is controlled, the app has full authority to determine what type of content it will accept. When migrating older mixes into newer versions of the application, they retain all of their musical relationships regardless of whether certain elements are only editable via code.
 
-I used Claude Code throughout, with `CLAUDE.md` as the standing rules and
-`docs/contract.md` and `docs/architecture.md` as the references it must read.
-Larger features ran on separate branches in parallel (live updates, audio,
-drafts) and were merged back once their tests passed
-([4a406d8](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/4a406d8),
-[03c5e2f](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/03c5e2f)).
-After each feature I ran a review pass and treated its findings as bugs to
-reproduce first, not suggestions. I asked for measurement before limits: the
-128-steps-per-bar bound exists because a load probe showed a throttled browser
-silently dropping 89% of events, not because it seemed a reasonable number.
+[e3993c2](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/e3993c2)
 
-The trade-off is volume. Forty-nine commits landed in one day before crit 9, and
-reviewing that much agent output carefully is the real cost of this workflow.
-The spec is what made it survivable: 116 checks run against the running app on
-every push, and CI deploys only the container those checks passed against
-([e02edea](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/e02edea)).
+## Interaction With Agent
 
-## Corrections that landed in the harness
+Prior to implementing the application, I created a document outlining the users' capabilities/permissions and how the application would check for completion. In the document, I specified that once a performance was shared with others, all unused project materials would remain private. Additionally, I stated that if a request was denied by the application, it should identify which user made such a request. The application should also preserve any handwritten code. During development checkpoints, I reviewed results and directed my subsequent modifications based upon those reviews. Issues had to be reproduced before a correction could be verified. Based on six such findings, I implemented six corrections.
 
-- The agent wrote a change and its event as two statements, so a failure
-  between them could leave a change nobody's page heard about
-  ([2be50bc](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/2be50bc)).
-  This became the `CLAUDE.md` rule "a database mutation and its event commit
-  together; broadcast only after commit"
-  ([e2fbe48](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/e2fbe48)),
-  and the contract tests check that a refused edit leaves no event.
-- An "also play other people's code" checkbox trusted every later edit to a
-  track forever
-  ([6058634](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/6058634)).
-  It became "never execute submitted source text", and a spec test sends
-  `fetch(...)` as code and expects a refusal.
-- The transport claimed "Playing" while nothing played, because Strudel
-  resolves `evaluate()` even on error
-  ([2611e3b](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/2611e3b)).
-  The fix was checked against the real library, not a stub.
-- Ownership was checked only once a track existed, so one visitor could claim
-  another's reserved track
-  ([f5c1a34](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/f5c1a34)).
-  Track ownership and revision checks on the server became an invariant.
-- Logging who did what is now a `CLAUDE.md` rule, and `spec/logging.test.ts`
-  boots a server and fails if a change or refusal doesn't name the visitor.
+[448eea8](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/448eea8) [7f66d94](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/7f66d94)
 
-## What is still open
+## Interface Design
 
-A phone-size keyboard browser test fails intermittently when run after the
-conflict test; I narrowed the race but haven't closed it
-([fc494fb](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/fc494fb)).
-The "audible in a minute" claim is still judged by watching people, not
-tested, and two devices sounding in time is measured as scheduled timestamps,
-not by ear.
+I asked the agent to create three different renderings of the design for the interface. The agent chose Main Stage because it provided both character controls and playback controls in the same view. Upon testing Main Stage at phone width, I agreed with this choice. Reviewing the designs prior to selecting the final design enabled me to compare various layout configurations. Several items regarding motion, keyboard ordering, and focus while performing background updates still required browser-specific checks. The agent executed and reported back on all automated tests. I performed listening tests.
+
+[5324a68](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/5324a68) [93e9aa6](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/93e9aa6)
+
+## Sharing Private Clips
+
+One test revealed that private clips that were never used in a performance were being exposed to an audience when a performance was published. The application was exposing the entire workspace, including private clips that had been saved but left un-staged. The error was treating the project as a single entity for visibility purposes. I modified the rule so that the audience sees only the music that is used by the performance. To accomplish this modification, I filtered the data that is shared with the audience down to just that portion of the data that corresponds to the performance's plan. Later I found a related issue where stopping playback caused the saved plan and mix settings to be lost. To correct this issue, I implemented a solution to preserve the saved plan and mix settings after playback stops.
+
+[a2390a6](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/a2390a6) [f4e645c](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/f4e645c)
+
+## Four-bar patterns made non-editable
+
+When I tried to make some changes to a character with four bars of sixteen steps that was open in the editor it would not allow me to do anything. I soon realized that the limit had been set to apply to all of the character's bars rather than just one. I raised the limit to see if that would help, but it didn't fix my problem because I was still using the wrong setting. What needed to be done was to create a new way of separating the limits of how many steps each bar can contain from the overall number of steps. One regression test is to ensure that users are able to edit valid four-bar patterns. That same test fails under the previous rule. Once I created the new rule, I ran it through CI and sent it out. Next I went back to my live creator and tested both marking viewport widths to confirm that the grid worked once again.
+
+[1746159](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/1746159)
+
+## Feedback and Decisions
+
+My peer feedback helped prioritize my sound editing, export, sectioning and reaction features. However, I also felt that users should be able to build a character's look by choosing parts, as opposed to simply altering a preset's colors. Users now get a copy of the shared character whenever they use it. Listings are populated with saved snapshots so that when the user goes back to edit them, they won't change existing copies.
+
+[74cfeab](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/74cfeab) [f5743a9](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/f5743a9) [4a369ea](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/4a369ea) [8781c80](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/8781c80)
+
+I decided upon fixed rules for build-up suggestions based on the roles of the characters on stage. By doing this I am making sure that there is predictability and consistency. Using an outside AI tool was an alternative. I could also save those suggestions into the shared plan, but I opted for the easier-to-implement rule-based model.
+
+[e3e4c5d](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/e3e4c5d)
+
+## Check and Remaining Gaps
+
+Our automated testing suite covers individual identity, permission for editing, privacy concerns, potential conflicts of saving and record keeping of who participated. No ordinary listener can edit. Guest performers may edit their own session tracks as long as they are admitted guests. The browser checks include testing the production version of our site, reduced motion, slow connection speeds, and ability to use a keyboard at mobile-width. We also manually checked our saved work after we re-deployed.
+
+[7259aa3](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/commit/7259aa3)
+
+Using the Manual Release Sheet on 7 November 2026, I did a basic usability test on the deployed website. I found issues with side-scrolling at mobile-width and small navigation targets. Both issues were resolved by improving layouts and enlarging navigation targets. The listening across two laptops served as an informal timing test. However, it does not measure output latency. Our final build still requires an uncoached first-use test and a screen reader test. Representative network testing for our application remains incomplete, although a deployed timing measurement already exists.
+
