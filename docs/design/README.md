@@ -39,3 +39,12 @@ keeps characters large, which is where the creator's work shows. Coin-Op's tacti
 depth carried over to the Play control. The cost of Main Stage showed in the preview
 and was fixed in the real interface: dark outlines fade into a dark wall, so the
 stage is lighter behind the characters.
+
+## What shipped
+
+Screenshots of the finished interface are in [`built/`](built/): the
+[empty stage](built/desktop-fresh.png), a [full stage of twelve](built/desktop-twelve.png),
+[sections](built/desktop-sections.png), the [creator](built/desktop-creator-music.png),
+[reactions on a performer's stage](built/desktop-reactions.png), and the
+[stage](built/phone-stage.png), [step grid](built/phone-pattern.png) and
+[creator](built/phone-creator.png) on a phone.

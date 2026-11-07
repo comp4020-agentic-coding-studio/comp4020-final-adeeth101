@@ -141,6 +141,13 @@ figure says more about that path than about the app. From Canberra the round tri
 should be far shorter, but that has not been measured, and it is the number the "about
 a second" requirement cares about.
 
+The work from that run was then left in place across a real redeploy, to `edd47dc`.
+Afterwards the copy, the mix and its six sequence steps were all there, with the source
+byte for byte and the transport stopped. Stopping sharing and deleting the original left
+the other identity's copy intact; deleting the mix gave the member 404; and deleting it
+for good removed it. The release fixtures were then removed, leaving nothing live or
+listed.
+
 An earlier run of this check is what found the overtaken-refresh fault above, and a
 crash in that run left one private mix and one unlisted character on the live database
 whose owner identity was not saved. Neither can be found or read by anyone.
