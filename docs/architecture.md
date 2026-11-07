@@ -270,10 +270,22 @@ model's limits: four sections and eight sequence entries. For one mix that has
 proved enough to say something, and raising them would be a change to those limits
 rather than a new system.
 
-AI transitions were left out. A transition would need a model call, a key and a
-result that differs between runs, in a product whose shared playback depends on
-everyone following one durable plan. What people actually lack at that moment is a
-starting shape, and a few rules about roles give one.
+Model-generated transition suggestions were left out in favour of a bounded,
+role-based suggestion that needs no service or credential and can be inspected
+before applying it. A generated suggestion could also be saved as a durable plan;
+AI does not inherently prevent synchronised playback. The choice here avoids a
+service dependency while providing a small starting arrangement. Its usefulness
+still calls for observation with people.
+
+## A grid bound that follows musical length
+
+The first step editor bounded an entire literal to 32 columns even when the
+interface offered four bars of sixteen steps. That action wrote valid music
+which the same editor then refused to display. The bound now allows 32 columns
+per bar, with a separate 128-column total cap. One-bar limits remain unchanged,
+four-bar characters stay editable, and length changes are checked before they
+can create an unsupported draft. Grid detail is a view preference and never
+rewrites source or discards finer events.
 
 ## Build and deployment
 

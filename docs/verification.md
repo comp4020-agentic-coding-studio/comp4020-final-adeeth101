@@ -1,5 +1,54 @@
 # Verification record
 
+## 7 November 2026: four-bar editor recovery
+
+A reported creator failure was reproduced before changing the code: lengthening
+the blank 16-step drum or note character to four bars wrote 64 valid steps, then
+the grid rejected the whole layer against a 32-column limit. Selecting eight
+steps was only a view change, so it could not recover that source. Length controls
+then had no usable lane to shorten. Three DOM regressions failed on that build.
+
+The editor now allows 32 columns per bar, with a separate 128-column total bound.
+Four bars at sixteen steps remain editable. The one-bar bound still refuses a
+40-step source. Length changes are checked before writing an unsupported draft,
+and switching grid detail retains focus without rewriting source. The regression
+also edits the final bar, undoes that edit and shortens back to the original.
+
+The production browser regression repeats this creator path at 1920×1080 and
+390×844, asserting no page error, no document overflow, exact source preservation
+through detail changes, and usable final-bar cells. Screenshots are generated at
+`.playwright/grid-recovered-1920.png` and `grid-recovered-390.png`.
+The [four-bar screenshots](evidence/README.md) are retained with their test context.
+
+Against production image `e4b99c822139`, constrained to 256 MB with an isolated
+temporary database: `pnpm check` passed (514 tests, one expected CI skip, 36 files),
+all 37 production browser flows passed, and `pnpm check:evidence` passed. The
+skipped README-live-edit test cannot edit a file inside a built container from
+the host checkout; it was also run against the local source server, where all
+16 contract tests passed. No shipped test was weakened or removed.
+The browser suite includes three identities, restart recovery, privacy, conflicts,
+keyboard use, slow connections, export, listing deletion and accessible new tools.
+This pass changes no audio synthesis or transport code; earlier audio/load figures
+below are historical measurements, not probes repeated in this pass.
+
+The first invocation had no running test server, and the first container check
+did not set `CI=true`, so the host-only README edit probe failed as expected.
+The new browser test initially omitted the blank-role chooser and waited for
+Music on the wrong dialog; choosing Beats corrected the test. These setup errors
+were not application failures and are not counted as product fixes.
+
+### Human observations reported on this build family
+
+The student reports listening during actual use and finding the music enjoyable,
+and observing synchronised playback across multiple laptops. These are useful
+informal observations. The date, participants, exact preset coverage and device
+configurations were not supplied, so they do not establish that every character
+was individually listened to, nor quantify inter-device audio latency. The
+uncoached creator/sections journey and real screen-reader use remain unverified.
+
+The previously recorded busiest-mix peak is **−0.4 dBFS**, not +0.4 dBFS. The
+minus sign was omitted in one handoff; the measurement table below is correct.
+
 ## 7 November 2026: characters, the step grid and the Main Stage
 
 ### Baseline
@@ -82,7 +131,9 @@ the music stopped.
 ### Audio measurement
 
 `pnpm test:audio`, through the real output chain at full device level, in isolated
-renders. Automated measurements only: **nobody has listened to these.**
+renders. These figures are automated measurements, not listening judgments.
+Subsequent student listening observations are recorded above; individual coverage
+of all 72 characters has not been established.
 
 | Measure | Observed |
 | --- | --- |
@@ -150,7 +201,11 @@ listed.
 
 An earlier run of this check is what found the overtaken-refresh fault above, and a
 crash in that run left one private mix and one unlisted character on the live database
-whose owner identity was not saved. Neither can be found or read by anyone.
+whose owner identity was not saved. They are excluded from public discovery;
+the private mix still requires permission, while an unlisted character may be read
+by someone possessing its valid link. Unlisted is not equivalent to inaccessible.
+Exact resource identifiers have not been recovered for a safe targeted cleanup;
+deleting rows by a default title would risk unrelated saved work.
 
 ### Design directions
 

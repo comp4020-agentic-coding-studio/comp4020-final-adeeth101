@@ -16,6 +16,41 @@ async function mix(browser:Browser,viewport={width:1920,height:1080},options={})
 const add=(page:Page,name:string)=>page.getByRole('button',{name:new RegExp(`^Add( and play)? ${name}$`)}).click();
 const open=async(page:Page,index=0,tab='Pattern')=>{await page.locator('.performer[data-part] .performer-btn').nth(index).click();await page.getByRole('tab',{name:tab}).click();};
 
+for(const viewport of [{width:1920,height:1080},{width:390,height:844}]){
+  test(`creator recovers between 8 and 16 steps with four bars at ${viewport.width}px`,async({browser})=>{
+    const context=await browser.newContext({viewport}),page=await context.newPage(),errors:string[]=[];
+    page.on('pageerror',e=>errors.push(e.message));
+    try{
+      await page.goto('/characters');await page.getByRole('button',{name:'Create character',exact:true}).click();
+      await page.getByRole('button',{name:'Beats',exact:true}).click();
+      await page.getByRole('tab',{name:'Music',exact:true}).click();
+      await page.getByRole('button',{name:'Strudel code',exact:true}).click();
+      await page.locator('#creator-code').fill(`s("${Array(16).fill('~').join(' ')}")`);
+      await page.getByRole('button',{name:'Steps',exact:true}).click();
+      const grid=page.locator('#creator-music');
+      await grid.locator('[data-pe="bars"][data-n="4"]').click();
+      await expect(grid.locator('.cell').first()).toBeVisible();
+      await expect(grid).not.toContainText('more than the grid');
+      const saved=await page.evaluate(()=>(window as any).ensembleCreator.state().source);
+      for(const n of [8,16,8,16]){
+        await grid.locator(`[data-pe="target"][data-n="${n}"]`).click();
+        await expect(grid.locator(`[data-pe="target"][data-n="${n}"]`)).toHaveAttribute('aria-pressed','true');
+        await expect(grid.locator(`[data-pe="target"][data-n="${n}"]`)).toBeFocused();
+        expect(await page.evaluate(()=>(window as any).ensembleCreator.state().source)).toBe(saved);
+      }
+      await page.screenshot({path:`.playwright/grid-four-bars-${viewport.width}.png`,fullPage:true});
+      const last=grid.locator('.cell[data-token="bd"][data-c="63"]');await last.click();
+      await expect(last).toHaveAttribute('aria-pressed','true');
+      await grid.getByRole('button',{name:'Undo step',exact:true}).click();
+      expect(await page.evaluate(()=>(window as any).ensembleCreator.state().source)).toBe(saved);
+      await grid.locator('[data-pe="bars"][data-n="1"]').click();
+      await expect(grid.locator('.cell[data-token="bd"]')).toHaveCount(16);
+      expect(errors).toEqual([]);expect(await noSideScroll(page)).toBe(true);
+      await page.screenshot({path:`.playwright/grid-recovered-${viewport.width}.png`,fullPage:true});
+    }finally{await context.close();}
+  });
+}
+
 test('switching between Pattern, Shape and Code never rewrites the source',async({browser})=>{
   const {context,page}=await mix(browser);
   try{

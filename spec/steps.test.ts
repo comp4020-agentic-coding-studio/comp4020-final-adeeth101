@@ -170,6 +170,21 @@ describe('changing sounds and layers',()=>{
     expect(viewColumns(lane('s("[bd bd bd] sd")'),16)).toBe(18);
     expect(viewColumns(lane('note("<a3 c4 e4>").s("sine")'),16)).toBe(3);
   });
+  it('allows 16 steps per bar across four bars without relaxing the one-bar bound',()=>{
+    const source=`s("${Array(16).fill('~').join(' ')}")`;
+    const four=setBars(source,lane(source),4),l=lane(four);
+    expect(l.problem).toBeNull();expect(l.columns).toBe(64);
+    expect(viewColumns(l,64)).toBe(64);
+    expect(writeLane(four,l,64,toggleHit(l.events,[],63,'bd'))).toContain('bd');
+    expect(lane(`s("${Array(40).fill('~').join(' ')}")`).problem).toMatch(/40 steps/);
+  });
+  it('refuses a length change before it strands the pattern beyond the total grid bound',()=>{
+    const source='s("hh*16 ~")',l=lane(source);
+    expect(l.columns).toBe(32);
+    expect(canSetBars(l,8)).toMatch(/grid can show/);
+    expect(()=>setBars(source,l,8)).toThrow(/grid can show/);
+    expect(readPattern(source).problem).toBeNull();
+  });
 });
 
 describe('the cast suits the grid',()=>{

@@ -4,7 +4,7 @@
 // between this and Code freely and nothing changes until they place a step.
 import {esc} from './ui.ts';
 import {DRUMS,VOICES,ExprError,type Voice} from '../shared/expr.ts';
-import {readPattern,writeLane,scaled,toggleHit,toggleNote,hasToken,viewColumns,kitRows,limitations,setVoice,setBars,canSetBars,addLayer,removeLayer,swapToken,unrolledCopy,noteName,type Lane,type PatternView} from '../shared/steps.ts';
+import {readPattern,writeLane,scaled,toggleHit,toggleNote,hasToken,viewColumns,kitRows,limitations,setVoice,setBars,canSetBars,addLayer,removeLayer,swapToken,unrolledCopy,noteName,MAX_PATTERN_COLUMNS,type Lane,type PatternView} from '../shared/steps.ts';
 
 export const DRUM_LABEL:Record<string,string>={bd:'Kick',sd:'Snare',hh:'Hat',oh:'Open hat',cp:'Clap',rim:'Rim',lt:'Low tom',ht:'High tom',cb:'Cowbell',sh:'Shaker'};
 export const VOICE_LABEL:Record<Voice,string>={sine:'Sine · soft',triangle:'Triangle · round',square:'Square · hollow',sawtooth:'Saw · bright',supersaw:'Supersaw · wide',pulse:'Pulse · nasal'};
@@ -44,7 +44,7 @@ export class PatternEditor{
   // A different character: forget its undo history and how it was being viewed.
   reset(){this.undo=[];this.spare=[];this.base=null;this.noteLane=0;this.message='';this.cursor={row:0,col:0,lane:'kit'};}
   private view():PatternView|null{try{return readPattern(this.host.source());}catch{return null;}}
-  private columns(l:Lane){return viewColumns(l,Math.min(32,this.target*Math.max(1,l.bars)));}
+  private columns(l:Lane){return viewColumns(l,Math.min(MAX_PATTERN_COLUMNS,this.target*Math.max(1,l.bars)));}
   private commit(next:string,before=this.host.source()){
     if(next===before)return;
     this.undo.push(before);if(this.undo.length>60)this.undo.shift();
@@ -143,7 +143,7 @@ export class PatternEditor{
   private act(el:HTMLElement){
     const a=el.dataset.pe!,n=Number(el.dataset.n);
     switch(a){
-      case 'target':this.target=n;this.render();return;
+      case 'target':this.target=n;this.render();this.root.querySelector<HTMLElement>(`[data-pe="target"][data-n="${n}"]`)?.focus({preventScroll:true});return;
       case 'brush':this.brush=n;this.render();return;
       case 'layer':this.noteLane=n;this.base=null;this.render();return;
       case 'scale':this.scaleOnly=!this.scaleOnly;this.render();return;

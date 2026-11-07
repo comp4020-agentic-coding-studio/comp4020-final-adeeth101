@@ -15,15 +15,17 @@ question this app answers differently.
   this app's "canonical pattern shape" comes from, even though Tidal itself is
   single-author.
 - **Strudel** — Felix Roos and Alex McLean, [strudel.cc](https://strudel.cc/),
-  a JavaScript/browser port of Tidal's pattern engine running since January
-  2022. It is the REPL every browser in this app evaluates locally; the server
-  never touches audio because Strudel already assumes it runs client-side.
+  a JavaScript/browser implementation of Tidal's pattern approach. Ensemble
+  parses its closed source grammar without executing submitted JavaScript,
+  compiles the accepted patterns through Strudel, and synthesises audio in the
+  browser. The server persists musical documents and plans rather than audio.
 - **Flok** — Damián Silvani, [flok.cc](https://flok.cc/) /
   [source](https://github.com/munshkr/flok). A peer-to-peer collaborative text
   editor (WebRTC, CodeMirror) where everyone shares one editable buffer per
   language slot — editing is undifferentiated: whoever is in a slot can change
-  anything in it. This app instead gives each visitor their own track, so
-  simultaneous edits don't collide inside one person's line.
+  anything in it. Ensemble keeps creation and edit credits per track and uses
+  leases and revision checks for project-member edits; performance guests can
+  edit only their own session tracks. It does not synchronise a shared text buffer.
 - **Gibber** — Charlie Roberts, [gibber.cc](https://gibber.cc/). A pure
   JavaScript, audiovisual live-coding environment with built-in support for
   networked ensemble performance, where remote users can control a shared

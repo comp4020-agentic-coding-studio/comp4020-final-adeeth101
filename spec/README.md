@@ -23,6 +23,13 @@ however you run it and `pnpm check` finds it at `APP_URL` (default
 
 ## Your checks
 
+`pattern-editor-view.test.ts` reproduces the four-bar editor dead end with both
+drum and note sources, source-preserving 8/16 detail changes, final-bar edits,
+undo, shortening and focus. `steps.test.ts` retains the one-bar bound and checks
+that an excessive length is refused before changing source.
+`browser/creative.pw.ts` repeats the creator recovery journey at both marking
+viewports and checks that it produces no page errors or document overflow.
+
 `guest-editor.test.ts`, `chat-blocks.test.ts`, `transport-stop.test.ts` and
 `performer.test.ts` cover the remaining review findings and durable Stop/Play.
 `browser/corrections.pw.ts` exercises guest code/Shape editing, two guests with

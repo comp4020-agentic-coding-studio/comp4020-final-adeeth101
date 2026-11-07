@@ -12,6 +12,10 @@ import {parse} from 'acorn';
 import {parseMini,parseSource,TIME_FACTORS,DRUMS,VOICES,LIMITS,ExprError,type Mini,type Voice} from './expr.ts';
 
 export const MAX_COLUMNS=32;
+// The limit is per bar, not per literal: four bars at 16 steps need 64
+// columns. Keep a separate total bound so long code patterns cannot grow the DOM.
+export const MAX_PATTERN_COLUMNS=128;
+export const columnLimit=(bars:number)=>Math.min(MAX_PATTERN_COLUMNS,MAX_COLUMNS*Math.max(1,bars));
 export type Token=string|number;       // a drum name, or a MIDI note
 export type GridEvent={col:number;len:number;tokens:Token[]};
 export type LockedStep={col:number;len:number;text:string;reason:string};
@@ -89,7 +93,7 @@ function splitPieces(text:string,base:number):{pieces:Span[];comma:boolean}{
 // alone, [a b] would come back as the two slots inside it.
 function slotsOf(piece:string,kind:'sound'|'note'):{node:Mini;weight:number}[]{return (parseMini(`~ ${piece}`,kind) as Extract<Mini,{t:'seq'}>).items.slice(1);}
 
-function readLiteral(text:string,kind:'sound'|'note'){
+function readLiteral(text:string,kind:'sound'|'note',maxColumns:number){
   const trimmed=text.trim(),lead=text.length-text.trimStart().length;
   const empty={columns:1,events:[] as GridEvent[],locked:[] as LockedStep[],pieces:[] as Piece[],alternates:false};
   // <a b c>: one step per bar, the whole literal one long sequence.
@@ -103,7 +107,7 @@ function readLiteral(text:string,kind:'sound'|'note'){
   let k=1;
   for(const p of parsed)for(const x of p.slots){const r=resolution(x.node);if(r!==null)k=lcm(k,r/gcd(r,x.weight));}
   const columns=total*k;
-  if(columns>MAX_COLUMNS)return {...empty,problem:`This layer needs ${columns} steps, more than the grid’s ${MAX_COLUMNS}.`};
+  if(columns>maxColumns)return {...empty,problem:`This layer needs ${columns} steps, more than the grid’s ${maxColumns} for this length.`};
   const events:GridEvent[]=[],locked:LockedStep[]=[],pieces:Piece[]=[];
   let col=0;
   for(const p of parsed){
@@ -161,7 +165,7 @@ export function readPattern(source:string):PatternView{
     const voice=voiceNode?(stringSpan(voiceNode)?.text as Voice):null,voiceSpan=voiceNode?stringSpan(voiceNode)?.span??null:null;
     const shared={index,kind,voice,bars,reversed:rev,voiceSpan,leafEnd:base.end,ownTime:own,outerBars,numeric:false};
     if(!lit){lanes.push({...shared,columns:1,events:[],locked:[],alternates:false,problem:'This layer’s text uses escapes the grid cannot rewrite.',literal:{start:literalNode.start,end:literalNode.end},text:'',pieces:[]});return;}
-    const read=readLiteral(lit.text,kind);
+    const read=readLiteral(lit.text,kind,columnLimit(bars));
     // Inside <…> each step lasts a whole bar.
     lanes.push({...shared,...read,bars:read.alternates?bars*read.columns:bars,numeric:/(^|[\s[<,])\d/.test(lit.text),literal:lit.span,text:lit.text});
   }
@@ -173,7 +177,7 @@ export function readPattern(source:string):PatternView{
 // The grid can be shown finer than the text needs. That changes nothing until a
 // step is edited.
 export function viewColumns(lane:Lane,target:number){
-  const options=lane.alternates?[lane.columns]:[1,2,3,4,6,8,12,16].map(m=>lane.columns*m).filter(c=>c<=MAX_COLUMNS);
+  const options=lane.alternates?[lane.columns]:[1,2,3,4,6,8,12,16].map(m=>lane.columns*m).filter(c=>c<=columnLimit(lane.bars));
   return options.find(c=>c>=target)??options.at(-1)??lane.columns;
 }
 export function scaled(lane:Lane,columns:number){
@@ -242,7 +246,7 @@ export function writeLane(source:string,lane:Lane,columns:number,next:GridEvent[
   const result=splice(source,lane.literal,text);
   const back=readPattern(result).lanes[lane.index];
   const size=lcm(back.columns,columns);
-  if(size<=MAX_COLUMNS*4){
+  if(size<=MAX_PATTERN_COLUMNS*4){
     const want=[...next].sort((a,b)=>a.col-b.col).map(e=>({...e,col:e.col*size/columns,len:e.len*size/columns}));
     const got=back.events.map(e=>({...e,col:e.col*size/back.columns,len:e.len*size/back.columns}));
     if(!sameEvents(want,got,lane.kind==='sound'))throw new ExprError('That change could not be written exactly, so nothing was changed.');
@@ -296,6 +300,7 @@ export function canSetBars(lane:Lane,bars:number):string|null{
   const factor=bars/lane.outerBars;
   if(factor<1||!TIME_FACTORS.includes(factor))return 'The whole part is already stretched. Change its length in Code.';
   const ratio=bars/lane.bars;
+  if(lane.columns*ratio>columnLimit(bars))return 'That length needs more steps than the grid can show. Keep this length or edit it in Code.';
   if(ratio<1){
     const keep=lane.columns*ratio;
     if(!Number.isInteger(keep)||!lane.pieces.some(p=>p.col===keep))return 'These bars do not divide evenly. Change the length in Code.';
@@ -315,7 +320,10 @@ export function setBars(source:string,lane:Lane,bars:number):string{
   if(own){next=factor===1?splice(next,own.call,''):splice(next,own.arg,String(factor));}
   else if(factor!==1)next=next.slice(0,lane.leafEnd)+`.slow(${factor})`+next.slice(lane.leafEnd);
   next=splice(next,lane.literal,text);
-  parseSource(next);return next;
+  parseSource(next);
+  const back=readPattern(next).lanes[lane.index];
+  if(back.problem)throw new ExprError(back.problem);
+  return next;
 }
 // A new layer, added to the part's stack, or a new stack if it has none.
 export function addLayer(source:string,kind:'sound'|'note',steps=16):string{

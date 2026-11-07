@@ -141,10 +141,14 @@ changes.
 | `[a,b]` | A chord in one step |
 | `<a b c>` as the whole pattern | One step per bar |
 | `<a b>` beside other steps, `a/n`, layers inside a step | A locked step: shown, explained, kept verbatim, editable in Code |
-| commas at the top level, more than 32 steps | The layer is not shown; the reason is stated |
+| commas at the top level, more than 32 columns per bar or 128 per pattern | The layer is not shown; the reason is stated |
 
 A person can view a pattern finer than its text needs; that changes nothing
-until a step is placed. Length in bars repeats what is there, then writes
+until a step is placed. Eight/sixteen steps per bar selects viewing detail;
+finer timing already present is retained. Four bars at sixteen steps remain
+editable as 64 columns. Changing detail retains keyboard focus. A length
+change that would exceed the grid bounds is refused before changing the draft.
+Length in bars repeats what is there, then writes
 `.slow(n)`. **Make an editable copy** rewrites alternation as plain bars in a
 separate new track; the original is never touched. All 72 characters appear on
 the grid, and 70 have no locked step.
