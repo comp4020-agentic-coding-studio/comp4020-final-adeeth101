@@ -421,8 +421,14 @@ export async function mountRoom(host:HTMLElement,id:string){
   function editingSomething(){const a=document.activeElement as HTMLElement|null;return !!a&&el.drawer.contains(a)&&a.matches('textarea,select,input[type=text],input:not([type]),input[type=number],input[type=range]');}
 
   // --- data -----------------------------------------------------------------------------
-  async function refresh(){
-    const n=++refreshRun,next=await request(`/api/projects/${id}`);lastOk=Date.now();if(n!==refreshRun)return;
+  // Whoever awaits a refresh goes on to read the state, so a refresh overtaken by a
+  // newer one waits for that one. On a real network the stream's own update usually
+  // arrives while a command's refresh is still in flight; returning early there left
+  // callers reading the state from before their own change.
+  let latestRefresh:Promise<void>=Promise.resolve();
+  function refresh():Promise<void>{const run=loadState();latestRefresh=run;return run;}
+  async function loadState():Promise<void>{
+    const n=++refreshRun,next=await request(`/api/projects/${id}`);lastOk=Date.now();if(n!==refreshRun)return latestRefresh;
     if(next.access!=='member'){location.reload();return;}
     const prevSource=codeDraft?partOf(codeDraft.partId)?.clips.A?.source:null;
     state=next;

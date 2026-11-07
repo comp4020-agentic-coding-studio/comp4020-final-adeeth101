@@ -13,7 +13,7 @@ Before any change, at `4d5f380`, on production assets and an isolated database:
 | Check | Result |
 | --- | --- |
 | `pnpm check` | 510 tests in 35 files passed |
-| `pnpm test:browser` | 32 flows passed, at 1920×1080 and 390×844 where they matter |
+| `pnpm test:browser` | 33 flows passed, at 1920×1080 and 390×844 where they matter |
 | `pnpm check:evidence` | Passed |
 | The 14-step journey, repeated | 5 of 5 after the fix described below |
 | Migration 3 | Against a database written by the previous release over HTTP: every project, track, clip, revision, member, chat, visitor, invitation, performance and saved-sound row identical; the backup verified; a second boot changes nothing |
@@ -53,6 +53,12 @@ the music stopped.
   +0.1 dBFS with 2 clipped samples, because the limiter's 3 ms attack lets the fastest
   peaks through. A safety curve, exactly linear below 0.85, now holds it at −0.4 dBFS.
   Everything else measured sits below the curve and is unchanged.
+- **A command could read the state from before itself.** Found only on the deployed
+  site: going live reopened the Go live form, although the performance had started.
+  A refresh overtaken by a newer one returned early, so `await refresh()` could finish
+  with nothing applied, and on a real network the stream's update is often that newer
+  one. This predates this work and never showed on localhost. An overtaken refresh now
+  waits for the newest, and a browser flow with slowed snapshots fails without the fix.
 - **A blank drum character lost its rows.** Placing the first kick removed the snare,
   hat and clap rows, because they were offered only while the kit was empty. Found by
   a browser flow.
@@ -65,7 +71,7 @@ the music stopped.
 - A parse fault in the step grid (`[a b]` read as two slots) and a false "Saved." on a
   fresh remix were found by inspection, and the phone creator's overflow, low-contrast
   credits and a clipped kit label from looking at screenshots.
-- The journey failed once in six runs. It was the test's own race, reading the debug
+- The journey failed in two of its first six runs. It was the test's own race, reading the debug
   probe before calibration finished, which `recovery.pw.ts` already allows for. The
   product was not at fault.
 

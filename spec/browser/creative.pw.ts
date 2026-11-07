@@ -272,3 +272,16 @@ test('a suggested build-up is shown in words first, and only Use this changes an
     await expect(page.locator('.timeline li')).toHaveCount(6);
   }finally{await context.close();}
 });
+
+test('on a slow link, a command’s own refresh is never overtaken: going live shows the live state',async({browser})=>{
+  const {context,page}=await mix(browser);
+  try{
+    await add(page,'Pocket');await expect(page.locator('.performer[data-part]')).toHaveCount(1);await page.getByRole('button',{name:'Close the cast'}).click();
+    // Each snapshot takes a while, so the stream's update always lands while the
+    // command's own refresh is still on its way, as it does on a real network.
+    await page.route(/\/api\/projects\/[0-9a-f-]+$/,async route=>{await new Promise(r=>setTimeout(r,300));await route.continue();});
+    await page.getByRole('button',{name:'Go live'}).click();await page.getByRole('dialog').getByRole('button',{name:'Go live'}).click();
+    await expect(page.getByRole('button',{name:'Copy listen link'})).toBeVisible();
+    await expect(page.getByRole('dialog')).toContainText('Unlisted: anyone with the listen link');
+  }finally{await context.close();}
+});
