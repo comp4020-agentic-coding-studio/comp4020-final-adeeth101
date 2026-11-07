@@ -70,11 +70,17 @@ label{display:block;font-weight:700;margin-bottom:4px}
 .brand-mark{width:30px;height:30px;border-radius:50% 50% 44% 44%;background:var(--floor);position:relative;box-shadow:inset 0 -6px 0 var(--floor-low)}
 .brand-mark:before,.brand-mark:after{content:"";position:absolute;top:10px;width:6px;height:6px;border-radius:50%;background:var(--ink)}.brand-mark:before{left:8px}.brand-mark:after{right:8px}
 .site-header nav{display:flex;flex-wrap:wrap;gap:2px;align-items:center}
-.site-header nav a{color:var(--fg);text-decoration:none;font-weight:500;padding:8px 12px;border-radius:12px;min-height:44px;display:inline-flex;align-items:center}
-.site-header nav a:hover{background:var(--surface)}
-.site-header nav a[aria-current=page]{background:var(--surface-2);box-shadow:inset 0 -3px 0 var(--floor)}
+/* Every way of getting somewhere is a button you can hit with a thumb: a
+   bordered target of at least 44 by 44, never a word to aim at. */
+.site-header nav a{color:var(--fg);text-decoration:none;font-weight:500;padding:8px 12px;border-radius:12px;border:2px solid var(--line);min-height:44px;display:inline-flex;align-items:center}
+.site-header nav a:hover{background:var(--surface);border-color:var(--fg)}
+.site-header nav a[aria-current=page]{background:var(--btn);border-color:var(--btn);color:var(--btn-fg);font-weight:700}
 .notice-dot{background:var(--coral);color:var(--ink);border-radius:999px;padding:2px 8px;font-size:.75rem;font-weight:700}
-.site-footer{display:flex;flex-wrap:wrap;gap:16px;padding:16px;font-size:.875rem;justify-content:center}
+.site-footer{display:flex;flex-wrap:wrap;gap:8px;padding:16px;font-size:.875rem;justify-content:center}
+.site-footer a{color:var(--fg);text-decoration:none;font-weight:500;border:2px solid var(--line-strong);border-radius:14px;padding:10px 16px;min-height:44px;display:inline-flex;align-items:center}
+.site-footer a:hover{border-color:var(--fg)}
+/* A link inside a sentence stays a link, but a thumb-sized one. */
+.prose a,.lede a,p a:not(.primary):not(.outline):not(.ghost):not(.project-card){padding:2px 1px;text-decoration-thickness:2px;font-weight:700}
 .view-room .site-footer{display:none}
 #toast{position:fixed;left:50%;bottom:96px;transform:translate(-50%,40px);background:var(--cream);color:var(--ink);padding:12px 18px;border-radius:14px;max-width:min(92vw,520px);opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;z-index:70;font-weight:700;box-shadow:0 8px 24px rgba(0,0,0,.4)}
 #toast.show{opacity:1;transform:translate(-50%,0)}
@@ -220,6 +226,8 @@ label{display:block;font-weight:700;margin-bottom:4px}
 .seg button[aria-pressed=true]{background:var(--btn);color:var(--btn-fg);font-weight:700}
 .grid-scroll{overflow-x:auto;padding:3px;margin:-3px;scrollbar-width:thin}
 .step-grid{display:grid;grid-template-columns:92px minmax(0,1fr);gap:3px 6px;align-items:center;min-width:max-content}
+.grid-part{font-size:.78rem;font-weight:700;color:var(--muted);margin:10px 0 2px}
+.step-grid+.grid-part{margin-top:14px}
 .row-label{font-size:.82rem;font-weight:700;position:sticky;left:0;background:var(--cream);z-index:2;padding-right:4px;line-height:1.1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .row-label select{width:100%;min-height:34px;padding:2px 2px 2px 6px;font-size:.8rem;font-weight:700;border-width:1px;border-radius:8px}
 .row-label.scale{color:var(--ink)}.row-label.off{color:var(--muted);font-weight:500}
@@ -331,7 +339,7 @@ dialog.guest-editor .shape-input input{min-width:0}
   main{padding:12px 16px}
   h1{font-size:1.55rem}
   .site-header{padding:2px 8px;gap:0 2px;flex-wrap:nowrap}.site-header nav{justify-content:flex-end}.site-header nav a{padding:6px 7px;font-size:.88rem}.brand-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
-  .hero{grid-template-columns:1fr;padding:24px 18px 0;min-height:0}.hero-text{padding-bottom:0}.hero-band{padding-bottom:14px}.hero-band .figure{width:27%}
+  .hero{grid-template-columns:1fr;padding:24px 18px 0;min-height:0}.hero-text{padding-bottom:0}.hero-band{padding-bottom:14px}.hero-band .figure{flex:0 1 22%;width:22%;margin:0}
   .room-head{padding:4px 12px;gap:2px 8px}.room-title{width:100%}.room-title h1{font-size:1.25rem;flex:1 1 auto;min-width:0}.host-line{display:none}.faces li{width:32px;height:32px}.room-people{width:100%}.room-people .faces{margin-right:auto}.rename-word{display:none}.rename-mark{display:inline}
   .people-btn .label{display:none}
   .status-line{left:10px;top:auto;bottom:auto;position:static;background:var(--deep);border-radius:0;max-width:none;padding:2px 12px;font-size:.82rem}
@@ -342,14 +350,30 @@ dialog.guest-editor .shape-input input{min-width:0}
   .add-slot{padding-bottom:22px}.add-btn{font-size:.9rem;border-width:3px;border-radius:18px}.add-btn .plus{font-size:2rem}
   .dock{padding:8px;gap:6px}.dock .play{order:-2;flex:1 1 55%;min-width:0;margin-top:-18px;min-height:54px}.device-sound{order:-1;margin-top:-6px}.dock button{padding:8px 10px;font-size:.9rem}.volume{display:none}
   .sounds{grid-template-columns:1fr}
-  .tray{padding:10px 12px}.tray-head{position:relative;gap:6px}.tray-head h2{flex:1 1 100%;font-size:1.2rem;padding-right:44px}.tray-head .close{position:absolute;right:-6px;top:-8px}
-  .tray-filters{gap:6px}.pack-select{flex:1 1 100%}.pack-select select{flex:1;min-width:0}.tray-filters .chips{flex-wrap:nowrap;overflow-x:auto;width:100%;padding:2px}.chip{flex:none;padding:6px 12px}.tray-search{flex:1 1 100%}.tray-note{display:none}
+  .tray{padding:10px 12px}.tray-head{position:relative;gap:6px}.tray-head h2{flex:1 1 100%;font-size:1.2rem;padding-right:44px}.tray-head .close{position:absolute;right:0;top:-8px}
+  /* Sections and the sequence: down the screen, not off the side of it. */
+  .section-tiles{display:grid;grid-template-columns:1fr;gap:8px;overflow-x:visible;padding-bottom:0}
+  .section-tile{min-width:0}
+  .timeline{flex-wrap:wrap;overflow-x:visible}.timeline li{flex:1 1 150px;min-width:0}
+  .site-header nav a{padding:7px 9px;font-size:.84rem}
+  .site-footer{gap:6px}.site-footer a{padding:9px 12px}
+  .tray-filters{gap:6px}.pack-select{flex:1 1 100%}.pack-select select{flex:1;min-width:0}.tray-filters .chips{width:100%;padding:2px}.chip{padding:6px 12px}.tray-search{flex:1 1 100%}.tray-note{display:none}
   .part-actions{grid-template-columns:1fr 1fr}
-  .steps{--cell:30px}
+  /* Nothing on a phone is reached by dragging sideways. The grid comes in
+     blocks of eight (see client/pattern-editor.ts), and everything that was a
+     sideways strip on a wide screen wraps instead. */
+  .grid-scroll{overflow-x:visible;margin:0;padding:3px 0}
+  .step-grid{min-width:0;grid-template-columns:74px minmax(0,1fr)}
+  .steps{--cell:0}
+  .row-label{font-size:.76rem}.row-label select{font-size:.72rem}
   dialog.creator{overflow:auto}
   .creator-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);height:100dvh}
-  .dress{height:32dvh;min-height:210px;padding-bottom:12px}.dress .preview{width:auto;height:calc(100% - 44px);margin:0}.dress .preview .figure{height:100%;width:auto}.dress-name{font-size:1.05rem;padding:3px 12px}.dress:after{bottom:-150px}
-  .creator-head{padding:8px 12px 0}.creator-head h2{font-size:1.15rem}.creator-tabs{margin:6px 12px 0}.creator-panel{padding:10px 12px}.creator-foot{padding:8px 12px}
+  .dress{height:32dvh;min-height:210px;padding-bottom:12px}.dress .preview{width:auto;max-width:100%;height:calc(100% - 44px);margin:0}.dress .preview .figure{height:100%;width:auto;max-width:100%}.dress-name{font-size:1.05rem;padding:3px 12px}.dress:after{bottom:-150px}
+  .creator-head{padding:8px 12px 0}.creator-head h2{font-size:1.15rem}.creator-panel{padding:10px 12px}.creator-foot{padding:8px 12px}
+  /* Eight parts of a character, on two rows, rather than six on screen and two
+     off the side of it. */
+  .creator-tabs{margin:6px 12px 0;flex-wrap:wrap;overflow-x:visible}
+  .creator-tabs button{flex:1 1 auto;padding:8px 6px;font-size:.84rem;min-width:0}
   .opts{grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}.opt{font-size:.68rem;padding:3px;min-width:0}.opt .figure{width:100%}
   .lib-head h1{font-size:1.9rem}.char-grid{grid-template-columns:1fr 1fr;gap:8px}.char-card .fig{height:130px}
   .char-sheet{grid-template-columns:1fr}.char-sheet .figure{max-width:200px;margin:auto}

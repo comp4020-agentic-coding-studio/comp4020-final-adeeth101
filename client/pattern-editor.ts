@@ -31,7 +31,15 @@ export class PatternEditor{
   private undo:string[]=[];
   private message='';
   private cursor={row:0,col:0,lane:'kit'};
+  private narrow=false;
   constructor(private root:HTMLElement,private host:PatternHost){
+    // Turning the phone, or a desktop window getting narrow, changes how many
+    // steps fit on a line, so the grid is drawn again. Nothing about the music
+    // depends on this.
+    try{
+      const m=window.matchMedia('(max-width:760px)');
+      m.addEventListener('change',()=>{if(this.root.querySelector('.pattern'))this.render();});
+    }catch{/* a browser without matchMedia keeps one line */}
     root.addEventListener('click',e=>{
       const target=e.target as HTMLElement,cell=target.closest<HTMLElement>('.cell');
       if(cell&&root.contains(cell)){this.toggle(cell);return;}
@@ -65,6 +73,7 @@ export class PatternEditor{
     return [...real,...extra.map(token=>({lane:-1,token,virtual:true}))];
   }
   render(){
+    try{this.narrow=window.matchMedia('(max-width:760px)').matches;}catch{this.narrow=false;}
     const view=this.view();
     if(!view){this.root.innerHTML=`<div class="pattern"><p class="lanes-note">The grid reads this character’s code, and the code has a mistake right now, so there is nothing to show. Your text is safe. <button class="ghost small" data-pe="code">Fix it in Code</button></p></div>`;return;}
     const kit=view.lanes.filter(l=>l.kind==='sound'),notes=view.lanes.filter(l=>l.kind==='note');
@@ -82,6 +91,29 @@ export class PatternEditor{
     </div>`;
     this.restoreRoving();
   }
+  // A bar of sixteen steps cannot be a tappable row on a phone, and a grid you
+  // have to drag sideways hides half the music. So on a narrow screen the grid
+  // is cut into stacked blocks of eight steps. Every cell keeps its real column
+  // number, so the music, the keyboard, the playhead and the source are the
+  // same in either layout: only how many are on one line changes.
+  private static readonly BLOCK=8;
+  private blocks(cols:number):[number,number][]{
+    const per=this.narrow?Math.min(PatternEditor.BLOCK,cols):cols,out:[number,number][]=[];
+    for(let from=0;from<cols;from+=per)out.push([from,Math.min(per,cols-from)]);
+    return out;
+  }
+  // The columns of a row of `cols` steps that fall inside a block of the widest
+  // row, so a coarse row still lines up under a finer one.
+  private span(cols:number,widest:number,from:number,len:number){
+    const a=Math.round(from*cols/widest),b=Math.round((from+len)*cols/widest);
+    return Array.from({length:Math.max(0,b-a)},(_,i)=>a+i);
+  }
+  private blockWords(cols:number,from:number,len:number){
+    return this.blocks(cols).length>1?`, steps ${from+1} to ${from+len}`:'';
+  }
+  private blockLabel(cols:number,from:number,len:number){
+    return this.blocks(cols).length>1?`<p class="grid-part" aria-hidden="true">Steps ${from+1}–${from+len}</p>`:'';
+  }
   private beatClass(col:number,cols:number,bars:number){
     const perBar=cols/Math.max(1,bars),perBeat=perBar/4;
     return (Number.isInteger(perBar)&&col%perBar===0&&col>0?' bar':'')+(Number.isInteger(perBeat)&&col%perBeat===0?' beat':'');
@@ -96,17 +128,23 @@ export class PatternEditor{
   private kitHtml(view:PatternView,kit:Lane[]){
     const rows=this.rows(view),usable=kit.filter(l=>!l.problem),canEdit=this.host.editable();
     const unused=(DRUMS as readonly string[]).filter(d=>!rows.some(r=>r.token===d));
-    const grids=rows.map((r,index)=>{
-      const lane=r.virtual?usable[0]:view.lanes[r.lane];if(!lane)return '';
-      const cols=this.columns(lane),s=scaled(lane,cols);
-      const cells=Array.from({length:cols},(_,c)=>{
-        const lock=s.locked.find(l=>c>=l.col&&c<l.col+l.len),on=!r.virtual&&hasToken(s.events,c,r.token);
-        return `<button type="button" class="cell${this.beatClass(c,cols,lane.bars)}${lock?' locked':''}" data-grid="kit" data-r="${index}" data-c="${c}" data-lane="${r.virtual?-1:lane.index}" data-token="${r.token}" data-cols="${cols}" tabindex="-1" aria-pressed="${on}" ${lock?`aria-disabled="true" title="${esc(lock.reason)}"`:''} aria-label="${DRUM_LABEL[r.token]??r.token}, step ${c+1} of ${cols}${on?', on':''}${lock?', locked':''}"></button>`;
+    const lanes=rows.map(r=>(r.virtual?usable[0]:view.lanes[r.lane])??null);
+    const widest=Math.max(1,...lanes.filter((l):l is Lane=>l!==null).map(l=>this.columns(l)));
+    const body=this.blocks(widest).map(([from,len])=>{
+      const grids=rows.map((r,index)=>{
+        const lane=lanes[index];if(!lane)return '';
+        const cols=this.columns(lane),s=scaled(lane,cols);
+        const cells=this.span(cols,widest,from,len).map(c=>{
+          const lock=s.locked.find(l=>c>=l.col&&c<l.col+l.len),on=!r.virtual&&hasToken(s.events,c,r.token);
+          return `<button type="button" class="cell${this.beatClass(c,cols,lane.bars)}${lock?' locked':''}" data-grid="kit" data-r="${index}" data-c="${c}" data-lane="${r.virtual?-1:lane.index}" data-token="${r.token}" data-cols="${cols}" tabindex="-1" aria-pressed="${on}" ${lock?`aria-disabled="true" title="${esc(lock.reason)}"`:''} aria-label="${DRUM_LABEL[r.token]??r.token}, step ${c+1} of ${cols}${on?', on':''}${lock?', locked':''}"></button>`;
+        });
+        if(!cells.length)return '';
+        return `<div class="row-label"><select data-pe="row-sound" data-lane="${r.lane}" data-token="${r.token}" aria-label="Sound in row ${index+1}" ${canEdit&&!r.virtual?'':'disabled'}>${(DRUMS as readonly string[]).map(d=>`<option value="${d}" ${d===r.token?'selected':''} ${d!==r.token&&rows.some(x=>x.token===d&&x.lane===r.lane)?'disabled':''}>${DRUM_LABEL[d]}</option>`).join('')}</select></div><div class="steps" data-bars="${lane.bars}" data-cols="${cols}" style="--cols:${cells.length}">${cells.join('')}</div>`;
       }).join('');
-      return `<div class="row-label"><select data-pe="row-sound" data-lane="${r.lane}" data-token="${r.token}" aria-label="Sound in row ${index+1}" ${canEdit&&!r.virtual?'':'disabled'}>${(DRUMS as readonly string[]).map(d=>`<option value="${d}" ${d===r.token?'selected':''} ${d!==r.token&&rows.some(x=>x.token===d&&x.lane===r.lane)?'disabled':''}>${DRUM_LABEL[d]}</option>`).join('')}</select></div><div class="steps" data-bars="${lane.bars}" data-cols="${cols}" style="--cols:${cols}">${cells}</div>`;
+      return `${this.blockLabel(widest,from,len)}<div class="step-grid" role="group" aria-label="Drum steps${this.blockWords(widest,from,len)}. Arrow keys move, Space toggles.">${grids}</div>`;
     }).join('');
     return `<section aria-label="Drums"><div class="pattern-tools">${this.lengthHtml(usable,'kit')}${unused.length?`<div><label for="pe-add-drum">Add a drum</label><select id="pe-add-drum" data-pe="add-drum" ${canEdit?'':'disabled'}><option value="">Choose…</option>${unused.map(d=>`<option value="${d}">${DRUM_LABEL[d]}</option>`).join('')}</select></div>`:''}</div>
-      <div class="grid-scroll"><div class="step-grid" role="group" aria-label="Drum steps. Arrow keys move, Space toggles.">${grids}</div></div></section>`;
+      <div class="grid-scroll">${body}</div></section>`;
   }
   private noteRows(lane:Lane):number[]{
     const used=[...new Set(lane.events.flatMap(e=>e.tokens as number[]))];
@@ -122,12 +160,15 @@ export class PatternEditor{
     if(lane.problem)return `<section aria-label="Notes">${tabs}<p class="lanes-note">${esc(lane.problem)}</p></section>`;
     const cols=this.columns(lane),s=scaled(lane,cols),rows=this.noteRows(lane),shown=new Set(rows);
     const hidden=[...new Set(lane.events.flatMap(e=>e.tokens as number[]))].filter(n=>!shown.has(n));
-    const grid=rows.map((note,r)=>{
-      const cells=Array.from({length:cols},(_,c)=>{
-        const lock=s.locked.find(l=>c>=l.col&&c<l.col+l.len),e=s.events.find(x=>x.tokens.includes(note)&&c>=x.col&&c<x.col+x.len),head=e?.col===c;
-        return `<button type="button" class="cell${this.beatClass(c,cols,lane.bars)}${e&&!head?' tail':''}${e&&head&&e.len>1?' head':''}${lock?' locked':''}" data-grid="notes" data-r="${r}" data-c="${c}" data-lane="${lane.index}" data-note="${note}" data-cols="${cols}" tabindex="-1" aria-pressed="${!!e}" ${lock?`aria-disabled="true" title="${esc(lock.reason)}"`:''} aria-label="${noteName(note).toUpperCase()}, step ${c+1} of ${cols}${e?`, on${e.len>1?`, ${e.len} steps long`:''}`:''}${lock?', locked':''}"></button>`;
+    const grid=this.blocks(cols).map(([from,len])=>{
+      const lines=rows.map((note,r)=>{
+        const cells=this.span(cols,cols,from,len).map(c=>{
+          const lock=s.locked.find(l=>c>=l.col&&c<l.col+l.len),e=s.events.find(x=>x.tokens.includes(note)&&c>=x.col&&c<x.col+x.len),head=e?.col===c;
+          return `<button type="button" class="cell${this.beatClass(c,cols,lane.bars)}${e&&!head?' tail':''}${e&&head&&e.len>1?' head':''}${lock?' locked':''}" data-grid="notes" data-r="${r}" data-c="${c}" data-lane="${lane.index}" data-note="${note}" data-cols="${cols}" tabindex="-1" aria-pressed="${!!e}" ${lock?`aria-disabled="true" title="${esc(lock.reason)}"`:''} aria-label="${noteName(note).toUpperCase()}, step ${c+1} of ${cols}${e?`, on${e.len>1?`, ${e.len} steps long`:''}`:''}${lock?', locked':''}"></button>`;
+        }).join('');
+        return `<div class="row-label ${SCALE.has(note%12)?'scale':'off'}">${noteName(note).toUpperCase()}</div><div class="steps" data-bars="${lane.bars}" data-cols="${cols}" style="--cols:${len}">${cells}</div>`;
       }).join('');
-      return `<div class="row-label ${SCALE.has(note%12)?'scale':'off'}">${noteName(note).toUpperCase()}</div><div class="steps" data-bars="${lane.bars}" data-cols="${cols}" style="--cols:${cols}">${cells}</div>`;
+      return `${this.blockLabel(cols,from,len)}<div class="step-grid piano" role="group" aria-label="Note steps${this.blockWords(cols,from,len)}. Arrow keys move, Space toggles.">${lines}</div>`;
     }).join('');
     return `<section aria-label="Notes">${tabs}<div class="pattern-tools">
         ${lane.voiceSpan?`<div><label for="pe-voice">Instrument</label><select id="pe-voice" data-pe="voice" ${canEdit?'':'disabled'}>${(VOICES as readonly Voice[]).map(v=>`<option value="${v}" ${v===lane.voice?'selected':''}>${VOICE_LABEL[v]}</option>`).join('')}</select></div>`:''}
@@ -136,7 +177,7 @@ export class PatternEditor{
         <div><label id="pe-range">Notes</label><div class="seg" role="group" aria-labelledby="pe-range"><button type="button" data-pe="shift" data-n="-12" aria-label="Show lower notes">▼</button><button type="button" data-pe="shift" data-n="12" aria-label="Show higher notes">▲</button><button type="button" data-pe="scale" aria-pressed="${this.scaleOnly}">In key</button></div></div>
       </div>
       ${hidden.length?`<p class="small muted">${hidden.length} note${hidden.length===1?' is':'s are'} outside this view (${hidden.map(n=>noteName(n).toUpperCase()).join(', ')}). Use ▲ ▼ to see ${hidden.length===1?'it':'them'}.</p>`:''}
-      <div class="grid-scroll"><div class="step-grid piano" role="group" aria-label="Note steps. Arrow keys move, Space toggles.">${grid}</div></div>
+      <div class="grid-scroll">${grid}</div>
       ${many?`<button type="button" class="ghost small" data-pe="remove-layer" data-n="${lane.index}" ${canEdit?'':'disabled'}>Remove this layer</button>`:''}
     </section>`;
   }
@@ -224,8 +265,11 @@ export class PatternEditor{
     for(const old of this.root.querySelectorAll('.cell.live'))old.classList.remove('live');
     if(cycle===null)return;
     for(const steps of this.root.querySelectorAll<HTMLElement>('.steps')){
+      // data-cols is the whole row; a block holds only some of those columns,
+      // so the step is found by its number, not by its place in the block.
       const bars=Number(steps.dataset.bars),cols=Number(steps.dataset.cols);
-      steps.children[Math.floor((((cycle/bars)%1+1)%1)*cols)]?.classList.add('live');
+      const at=Math.floor((((cycle/bars)%1+1)%1)*cols);
+      steps.querySelector(`.cell[data-c="${at}"]`)?.classList.add('live');
     }
   }
 }

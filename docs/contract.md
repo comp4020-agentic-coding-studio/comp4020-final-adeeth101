@@ -148,6 +148,13 @@ until a step is placed. Eight/sixteen steps per bar selects viewing detail;
 finer timing already present is retained. Four bars at sixteen steps remain
 editable as 64 columns. Changing detail retains keyboard focus. A length
 change that would exceed the grid bounds is refused before changing the draft.
+
+How many steps sit on one line is a property of the screen, not of the music.
+Up to 760 px wide the grid is drawn in stacked blocks of eight, labelled
+`Steps 1-8` and `Steps 9-16`, so a bar is never reached by dragging sideways on
+a phone; wider than that it is one line. Each cell keeps its real column number
+in either layout, so the source it writes, the keyboard, the playhead and the
+step a person presses do not change with the window.
 Length in bars repeats what is there, then writes
 `.slow(n)`. **Make an editable copy** rewrites alternation as plain bars in a
 separate new track; the original is never touched. All 72 characters appear on
