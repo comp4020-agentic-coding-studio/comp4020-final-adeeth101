@@ -330,7 +330,7 @@ dialog.guest-editor .shape-input input{min-width:0}
 @media (max-width:760px){
   main{padding:12px 16px}
   h1{font-size:1.55rem}
-  .site-header{padding:2px 8px;gap:0 2px;flex-wrap:nowrap}.site-header nav{flex-wrap:nowrap}.site-header nav a{padding:6px 7px;font-size:.88rem}.brand-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+  .site-header{padding:2px 8px;gap:0 2px;flex-wrap:nowrap}.site-header nav{justify-content:flex-end}.site-header nav a{padding:6px 7px;font-size:.88rem}.brand-text{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
   .hero{grid-template-columns:1fr;padding:24px 18px 0;min-height:0}.hero-text{padding-bottom:0}.hero-band{padding-bottom:14px}.hero-band .figure{width:27%}
   .room-head{padding:4px 12px;gap:2px 8px}.room-title{width:100%}.room-title h1{font-size:1.25rem;flex:1 1 auto;min-width:0}.host-line{display:none}.faces li{width:32px;height:32px}.room-people{width:100%}.room-people .faces{margin-right:auto}.rename-word{display:none}.rename-mark{display:inline}
   .people-btn .label{display:none}
@@ -342,7 +342,8 @@ dialog.guest-editor .shape-input input{min-width:0}
   .add-slot{padding-bottom:22px}.add-btn{font-size:.9rem;border-width:3px;border-radius:18px}.add-btn .plus{font-size:2rem}
   .dock{padding:8px;gap:6px}.dock .play{order:-2;flex:1 1 55%;min-width:0;margin-top:-18px;min-height:54px}.device-sound{order:-1;margin-top:-6px}.dock button{padding:8px 10px;font-size:.9rem}.volume{display:none}
   .sounds{grid-template-columns:1fr}
-  .tray-head h2{flex:1 1 100%}.tray-search{flex:1 1 100%}
+  .tray{padding:10px 12px}.tray-head{position:relative;gap:6px}.tray-head h2{flex:1 1 100%;font-size:1.2rem;padding-right:44px}.tray-head .close{position:absolute;right:-6px;top:-8px}
+  .tray-filters{gap:6px}.pack-select{flex:1 1 100%}.pack-select select{flex:1;min-width:0}.tray-filters .chips{flex-wrap:nowrap;overflow-x:auto;width:100%;padding:2px}.chip{flex:none;padding:6px 12px}.tray-search{flex:1 1 100%}.tray-note{display:none}
   .part-actions{grid-template-columns:1fr 1fr}
   .steps{--cell:30px}
   dialog.creator{overflow:auto}

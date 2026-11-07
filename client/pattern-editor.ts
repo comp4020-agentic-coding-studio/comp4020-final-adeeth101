@@ -103,7 +103,7 @@ export class PatternEditor{
         const lock=s.locked.find(l=>c>=l.col&&c<l.col+l.len),on=!r.virtual&&hasToken(s.events,c,r.token);
         return `<button type="button" class="cell${this.beatClass(c,cols,lane.bars)}${lock?' locked':''}" data-grid="kit" data-r="${index}" data-c="${c}" data-lane="${r.virtual?-1:lane.index}" data-token="${r.token}" data-cols="${cols}" tabindex="-1" aria-pressed="${on}" ${lock?`aria-disabled="true" title="${esc(lock.reason)}"`:''} aria-label="${DRUM_LABEL[r.token]??r.token}, step ${c+1} of ${cols}${on?', on':''}${lock?', locked':''}"></button>`;
       }).join('');
-      return `<div class="row-label"><select data-pe="row-sound" data-lane="${r.lane}" data-token="${r.token}" aria-label="Sound in row ${index+1}" ${canEdit&&!r.virtual?'':'disabled'}>${(DRUMS as readonly string[]).map(d=>`<option value="${d}" ${d===r.token?'selected':''} ${d!==r.token&&rows.some(x=>x.token===d&&x.lane===r.lane)?'disabled':''}>${DRUM_LABEL[d]}</option>`).join('')}</select></div><div class="steps" data-lane="${lane.index}" data-cols="${cols}" style="--cols:${cols}">${cells}</div>`;
+      return `<div class="row-label"><select data-pe="row-sound" data-lane="${r.lane}" data-token="${r.token}" aria-label="Sound in row ${index+1}" ${canEdit&&!r.virtual?'':'disabled'}>${(DRUMS as readonly string[]).map(d=>`<option value="${d}" ${d===r.token?'selected':''} ${d!==r.token&&rows.some(x=>x.token===d&&x.lane===r.lane)?'disabled':''}>${DRUM_LABEL[d]}</option>`).join('')}</select></div><div class="steps" data-bars="${lane.bars}" data-cols="${cols}" style="--cols:${cols}">${cells}</div>`;
     }).join('');
     return `<section aria-label="Drums"><div class="pattern-tools">${this.lengthHtml(usable,'kit')}${unused.length?`<div><label for="pe-add-drum">Add a drum</label><select id="pe-add-drum" data-pe="add-drum" ${canEdit?'':'disabled'}><option value="">Choose…</option>${unused.map(d=>`<option value="${d}">${DRUM_LABEL[d]}</option>`).join('')}</select></div>`:''}</div>
       <div class="grid-scroll"><div class="step-grid" role="group" aria-label="Drum steps. Arrow keys move, Space toggles.">${grids}</div></div></section>`;
@@ -127,7 +127,7 @@ export class PatternEditor{
         const lock=s.locked.find(l=>c>=l.col&&c<l.col+l.len),e=s.events.find(x=>x.tokens.includes(note)&&c>=x.col&&c<x.col+x.len),head=e?.col===c;
         return `<button type="button" class="cell${this.beatClass(c,cols,lane.bars)}${e&&!head?' tail':''}${e&&head&&e.len>1?' head':''}${lock?' locked':''}" data-grid="notes" data-r="${r}" data-c="${c}" data-lane="${lane.index}" data-note="${note}" data-cols="${cols}" tabindex="-1" aria-pressed="${!!e}" ${lock?`aria-disabled="true" title="${esc(lock.reason)}"`:''} aria-label="${noteName(note).toUpperCase()}, step ${c+1} of ${cols}${e?`, on${e.len>1?`, ${e.len} steps long`:''}`:''}${lock?', locked':''}"></button>`;
       }).join('');
-      return `<div class="row-label ${SCALE.has(note%12)?'scale':'off'}">${noteName(note).toUpperCase()}</div><div class="steps" data-lane="${lane.index}" data-cols="${cols}" style="--cols:${cols}">${cells}</div>`;
+      return `<div class="row-label ${SCALE.has(note%12)?'scale':'off'}">${noteName(note).toUpperCase()}</div><div class="steps" data-bars="${lane.bars}" data-cols="${cols}" style="--cols:${cols}">${cells}</div>`;
     }).join('');
     return `<section aria-label="Notes">${tabs}<div class="pattern-tools">
         ${lane.voiceSpan?`<div><label for="pe-voice">Instrument</label><select id="pe-voice" data-pe="voice" ${canEdit?'':'disabled'}>${(VOICES as readonly Voice[]).map(v=>`<option value="${v}" ${v===lane.voice?'selected':''}>${VOICE_LABEL[v]}</option>`).join('')}</select></div>`:''}
@@ -218,14 +218,14 @@ export class PatternEditor{
     const next=rowCells[col];if(!next)return;
     cell.tabIndex=-1;next.tabIndex=0;next.focus();
   }
-  // Marks where the music is, from the bar position the page already knows.
+  // Marks where the music is, from the bar position the page already knows. It
+  // runs many times a second, so it reads what the grid already drew.
   mark(cycle:number|null){
     for(const old of this.root.querySelectorAll('.cell.live'))old.classList.remove('live');
     if(cycle===null)return;
-    const view=this.view();if(!view)return;
     for(const steps of this.root.querySelectorAll<HTMLElement>('.steps')){
-      const lane=view.lanes[Number(steps.dataset.lane)],cols=Number(steps.dataset.cols);if(!lane)continue;
-      const at=Math.floor((((cycle/lane.bars)%1+1)%1)*cols);steps.children[at]?.classList.add('live');
+      const bars=Number(steps.dataset.bars),cols=Number(steps.dataset.cols);
+      steps.children[Math.floor((((cycle/bars)%1+1)%1)*cols)]?.classList.add('live');
     }
   }
 }
