@@ -19,8 +19,15 @@ const SHAPE_LABEL:Record<Control,{label:string;help:string;step:number;fmt:(v:nu
   room:{label:'Space',help:'How much reverb the part sends.',step:0.01,fmt:v=>`${Math.round(v*100)}%`},
   pan:{label:'Left–right',help:'Where the part sits in stereo.',step:0.01,fmt:v=>v<0.48?`${Math.round((0.5-v)*200)}% left`:v>0.52?`${Math.round((v-0.5)*200)}% right`:'centre'},
   release:{label:'Sustain',help:'How long each note rings after it ends.',step:0.01,fmt:v=>`${v.toFixed(2)} s`},
+  hpf:{label:'Thinness',help:'A high-pass filter: higher removes the low end.',step:10,fmt:v=>`${Math.round(v)} Hz`},
+  attack:{label:'Fade in',help:'How slowly each note swells up.',step:0.01,fmt:v=>`${v.toFixed(2)} s`},
+  decay:{label:'Pluck',help:'How quickly each note falls away after it starts.',step:0.01,fmt:v=>`${v.toFixed(2)} s`},
+  sustain:{label:'Hold level',help:'How loud a note stays after it falls.',step:0.01,fmt:v=>`${Math.round(v*100)}%`},
+  delay:{label:'Echo',help:'How much of the part repeats in time with the mix.',step:0.01,fmt:v=>`${Math.round(v*100)}%`},
+  fm:{label:'Metal',help:'Frequency modulation: more sounds harder and more bell-like.',step:0.1,fmt:v=>v.toFixed(1)},
+  fmh:{label:'Metal colour',help:'The ratio of the modulator to the note.',step:0.05,fmt:v=>v.toFixed(2)},
 };
-const SHAPE_DEFAULT:Record<Control,number>={gain:1,lpf:16000,room:0,pan:0.5,release:0.06};
+const SHAPE_DEFAULT:Record<Control,number>={gain:1,lpf:16000,room:0,pan:0.5,release:0.06,hpf:20,attack:0.012,decay:0.1,sustain:1,delay:0,fm:0,fmh:1};
 
 export async function mountRoom(host:HTMLElement,id:string){
   let state:RoomSnapshot;

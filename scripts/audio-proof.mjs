@@ -40,4 +40,14 @@ try{
   console.log(JSON.stringify(levels,null,0).replaceAll('},{','},\n{'));
   const dense=await a.evaluate(()=>window.renderPreset(['arcade-four','arcade-engine','arcade-pixel','arcade-orbit','warm-pocket','warm-anchor','warm-sunbeam','warm-glow','night-heart','night-floor','night-lantern','night-velvet']));
   console.log(JSON.stringify({twelveParts:dense}));
+  // Every pack with all eight of its characters at once, then the twelve busiest
+  // characters in the catalogue together: the heaviest mix a stage can hold.
+  const mixes=await a.evaluate(async()=>{
+    const out=[];
+    for(const ids of window.packIds)out.push({...(await window.renderPreset(ids)),pack:ids[0],soundsInBusiestBar:window.densityOf(ids)});
+    const busiest=[...window.presetIds].sort((x,y)=>window.densityOf([y])-window.densityOf([x])).slice(0,12);
+    out.push({...(await window.renderPreset(busiest)),pack:'twelve busiest',soundsInBusiestBar:window.densityOf(busiest)});
+    return out;
+  });
+  console.log(JSON.stringify(mixes,null,0).replaceAll('},{','},\n{'));
 }finally{await browser.close();server.close();}

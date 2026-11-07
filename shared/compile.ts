@@ -9,7 +9,7 @@ import type { Expr, ExprDocument, Mini } from './expr.ts';
 
 // The published typings omit several runtime exports and controls; these are
 // the calls this file is allowed to make.
-interface P extends Omit<Pattern,"gain"|"lpf"|"room"|"fast"|"slow"|"rev"|"s"> {s(v:unknown):P;pan(v:number):P;release(v:number):P;gain(v:number):P;lpf(v:number):P;room(v:number):P;fast(v:number):P;slow(v:number):P;rev():P}
+interface P extends Omit<Pattern,"gain"|"lpf"|"room"|"fast"|"slow"|"rev"|"s"> {s(v:unknown):P;pan(v:number):P;release(v:number):P;gain(v:number):P;lpf(v:number):P;room(v:number):P;hpf(v:number):P;attack(v:number):P;decay(v:number):P;sustain(v:number):P;delay(v:number):P;fmi(v:number):P;fmh(v:number):P;fast(v:number):P;slow(v:number):P;rev():P}
 const lib = core as unknown as {s(p:unknown):P;note(p:unknown):P;stack(...p:P[]):P;sequence(...p:P[]):P;timeCat(...p:[number,P][]):P;pure(v:unknown):P;silence:P};
 const {s,note,stack,sequence,timeCat,pure,silence}=lib;
 
@@ -52,6 +52,13 @@ export function compileExpr(e: Expr): P {
         case 'room': return child.room(e.value);
         case 'pan': return child.pan(e.value);
         case 'release': return child.release(e.value);
+        case 'hpf': return child.hpf(e.value);
+        case 'attack': return child.attack(e.value);
+        case 'decay': return child.decay(e.value);
+        case 'sustain': return child.sustain(e.value);
+        case 'delay': return child.delay(e.value);
+        case 'fm': return child.fmi(e.value);
+        case 'fmh': return child.fmh(e.value);
       }
     }
     case 'time': return e.op === 'fast' ? compileExpr(e.child).fast(e.value) : compileExpr(e.child).slow(e.value);

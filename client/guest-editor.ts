@@ -7,8 +7,8 @@ import {parseSource,shapeState,applyShape,CONTROL_RANGE,type Control} from '../s
 import {presetById} from '../shared/presets.ts';
 import type {GuestPart} from '../shared/studio.ts';
 
-const LABEL:Record<Control,string>={gain:'Volume',lpf:'Brightness',room:'Space',pan:'Left–right',release:'Sustain'};
-const DEFAULT:Record<Control,number>={gain:1,lpf:16000,room:0,pan:0.5,release:0.06};
+const LABEL:Record<Control,string>={gain:'Volume',lpf:'Brightness',room:'Space',pan:'Left–right',release:'Sustain',hpf:'Thinness',attack:'Fade in',decay:'Pluck',sustain:'Hold level',delay:'Echo',fm:'Metal',fmh:'Metal colour'};
+const DEFAULT:Record<Control,number>={gain:1,lpf:16000,room:0,pan:0.5,release:0.06,hpf:20,attack:0.012,decay:0.1,sustain:1,delay:0,fm:0,fmh:1};
 type Hooks={preview:(source:string,partId:string)=>Promise<void>;stopPreview:()=>void;changed:()=>Promise<void>};
 
 export class GuestEditor {

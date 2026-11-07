@@ -1,13 +1,17 @@
 import {StudioAudio} from './audio.ts';
 import {parseCode} from '../shared/code.ts';
+import {compileDocument} from '../shared/compile.ts';
 import {parseSource} from '../shared/expr.ts';
 import {blankPlan,type Plan} from '../shared/performance.ts';
 import {PRESETS,PACKS} from '../shared/presets.ts';
 const audio=new StudioAudio();
 type Level={id:string;bpm:number;peak:number;peakDb:number;rmsDb:number;clipped:number};
-const global=window as unknown as {studioAudio:StudioAudio;testAudio:(epoch:number,source?:string)=>Promise<void>;presetIds:string[];renderPreset:(ids:string|string[])=>Promise<Level>};
+const global=window as unknown as {studioAudio:StudioAudio;testAudio:(epoch:number,source?:string)=>Promise<void>;presetIds:string[];packIds:string[][];renderPreset:(ids:string|string[])=>Promise<Level>;densityOf:(ids:string[])=>number};
 global.studioAudio=audio;
 global.presetIds=PRESETS.map(p=>p.id);
+global.packIds=PACKS.map(p=>p.presets.map(x=>x.id));
+// Sounds started in the busiest bar of a set of characters, over sixteen bars.
+global.densityOf=ids=>{let most=0;for(let bar=0;bar<16;bar++){let n=0;for(const id of ids){const p=PRESETS.find(x=>x.id===id)!;n+=(compileDocument(parseSource(p.source).document) as any).queryArc(bar,bar+1).filter((h:any)=>h.hasOnset()).length;}most=Math.max(most,n);}return most;};
 function planOf(ids:string[]):Plan{
   const plan=blankPlan();
   for(const id of ids){const p=PRESETS.find(x=>x.id===id)!;plan.catalog[id]={A:{revision:1,document:parseSource(p.source).document as never}};plan.sceneAssignments.A[id]='A';plan.mix[id]={gain:0.7,mute:false};}

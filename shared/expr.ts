@@ -5,9 +5,9 @@
 // server imports this file (Acorn only), never Strudel.
 import {parse} from 'acorn';
 
-export const DRUMS = ['bd','sd','hh','cp'] as const;
-export const VOICES = ['sine','triangle','square','sawtooth'] as const;
-export const CONTROLS = ['gain','lpf','room','pan','release'] as const;
+export const DRUMS = ['bd','sd','hh','cp','oh','rim','lt','ht','cb','sh'] as const;
+export const VOICES = ['sine','triangle','square','sawtooth','supersaw','pulse'] as const;
+export const CONTROLS = ['gain','lpf','room','pan','release','hpf','attack','decay','sustain','delay','fm','fmh'] as const;
 export type Drum = typeof DRUMS[number];
 export type Voice = typeof VOICES[number];
 export type Control = typeof CONTROLS[number];
@@ -26,8 +26,10 @@ export const LIMITS = {
   noteMax: 96,
 } as const;
 // Ranges follow Strudel's own units: gain is linear, lpf is Hz, room is the
-// reverb send, pan runs 0 (left) to 1 (right), release is seconds.
-export const CONTROL_RANGE: Record<Control,[number,number]> = {gain:[0,1],lpf:[60,16000],room:[0,1],pan:[0,1],release:[0.01,4]};
+// reverb send, pan runs 0 (left) to 1 (right), release, attack and decay are
+// seconds, sustain is a level, delay is an echo send, fm is modulation depth
+// and fmh the modulator's ratio to the note.
+export const CONTROL_RANGE: Record<Control,[number,number]> = {gain:[0,1],lpf:[60,16000],room:[0,1],pan:[0,1],release:[0.01,4],hpf:[20,8000],attack:[0.001,4],decay:[0.01,4],sustain:[0,1],delay:[0,1],fm:[0,16],fmh:[0.25,8]};
 // fast/slow by whole numbers, or by a half or quarter: every legal piece then
 // repeats after a whole number of bars, which is what makes the bounds exact.
 export const TIME_FACTORS = [0.25,0.5,1,2,3,4,5,6,7,8];
@@ -77,7 +79,7 @@ export function parseMini(text:string, kind:'sound'|'note', offset=0):Mini{
     const w=text.slice(start,i);
     if(!w)fail(text[i]===undefined?'The pattern ends too early.':`“${text[i]}” is not supported in this pattern.`,offset+start);
     count(1);
-    if(kind==='sound'){if(!(DRUMS as readonly string[]).includes(w))fail(`Unknown sound “${w}”. Use bd, sd, hh, cp or ~ for a rest.`,offset+start);return {t:'word',v:w as Drum};}
+    if(kind==='sound'){if(!(DRUMS as readonly string[]).includes(w))fail(`Unknown sound “${w}”. Use ${DRUMS.join(', ')} or ~ for a rest.`,offset+start);return {t:'word',v:w as Drum};}
     const v=noteValue(w);
     if(v===null)fail(`“${w}” is not a note. Use MIDI numbers or names like a3, c#4, eb2.`,offset+start);
     if(v!<LIMITS.noteMin||v!>LIMITS.noteMax)fail(`Note ${w} is outside MIDI ${LIMITS.noteMin}–${LIMITS.noteMax}.`,offset+start);
@@ -208,15 +210,15 @@ export function parseSource(source:string):ParsedSource{
         if(!n.arguments.length||n.arguments.length>LIMITS.stackItems)fail(`stack() takes 1 to ${LIMITS.stackItems} patterns.`,n.start);
         args(n,n.arguments.length,'stack');return {k:'stack',items:(n.arguments as Node[]).map(x=>walk(x,depth+1))};
       }
-      if(callee.name==='note')fail('Give the notes a synth: note("…").s("triangle"). Choose sine, triangle, square or sawtooth.',n.end);
-      return fail(`${callee.name}() is not supported. Use s, note, stack, gain, lpf, room, pan, release, fast, slow or rev.`,callee.start);
+      if(callee.name==='note')fail(`Give the notes a synth: note("…").s("triangle"). Choose ${VOICES.join(', ')}.`,n.end);
+      return fail(`${callee.name}() is not supported. Use s, note, stack, ${CONTROLS.join(', ')}, fast, slow or rev.`,callee.start);
     }
     if(callee.type!=='MemberExpression'||callee.computed||callee.optional||callee.property.type!=='Identifier')fail('Use plain method calls like .gain(0.5).',callee.start);
     const name=callee.property.name as string,base=callee.object as Node;
     if(name==='s'){
       if(base.type!=='CallExpression'||base.callee.type!=='Identifier'||base.callee.name!=='note')fail('.s("synth") goes straight after note("…").',callee.property.start);
       const [b]=args(base,1,'note'),[v]=args(n,1,'s'),{text,offset}=str(b,'note()'),voice=str(v,'.s()').text;
-      if(!(VOICES as readonly string[]).includes(voice))fail(`Unknown synth “${voice}”. Choose sine, triangle, square or sawtooth.`,v.start);
+      if(!(VOICES as readonly string[]).includes(voice))fail(`Unknown synth “${voice}”. Choose ${VOICES.join(', ')}.`,v.start);
       return {k:'note',mini:parseMini(text,'note',offset),voice:voice as Voice};
     }
     if(name==='rev'){args(n,0,'rev');return {k:'rev',child:walk(base,depth+1)};}
@@ -230,7 +232,7 @@ export function parseSource(source:string):ParsedSource{
       if(value<lo||value>hi)fail(`${name}() takes ${lo} to ${hi}.`,a.start);
       return {k:'set',ctl:name as Control,value,child:walk(base,depth+1)};
     }
-    return fail(`.${name}() is not supported. Use gain, lpf, room, pan, release, fast, slow or rev.`,callee.property.start);
+    return fail(`.${name}() is not supported. Use ${CONTROLS.join(', ')}, fast, slow or rev.`,callee.property.start);
   }
   const root=walk(body[0].expression,0);
   return {document:{schemaVersion:2,root},bounds:checkBounds(root)};
