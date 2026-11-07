@@ -5,21 +5,28 @@
 // public/app.js adds sound and saves without a reload; it is never required.
 import type { State, Trace } from "./feature.ts";
 import { trackOf } from "./identity.ts";
+import { siteFooter, siteHeader } from "./studio-page.ts";
 
 const escape = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
-const shell = (title: string, body: string): string => `<!doctype html>
+// These pages wear the same clothes as the rest of Ensemble: the same header
+// and footer, the same type and colours from studio.css, and style.css on top
+// for what only they have. They are still whole without a script.
+const shell = (title: string, body: string, here?: "readme" | "legacy"): string => `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escape(title)}</title>
+<title>${escape(title)} · Ensemble</title>
+<link rel="stylesheet" href="/static/studio.css">
 <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body class="page-${here ?? "legacy"}">
 <a class="skip" href="#main">Skip to content</a>
+${siteHeader("none")}
 ${body}
+${siteFooter(here)}
 </body>
 </html>
 `;
@@ -113,7 +120,7 @@ export function page(state: State, notice?: string, draft?: string): string {
       <span class="bar__msg" data-handle-status role="status"></span>
     </form>
   </details>
-  <nav><a href="/readme/">What good means</a></nav>
+  <nav><a class="outline small" href="/readme/">What good means</a></nav>
 </header>
 
 <main id="main" data-since="${Number(state.meta.latestEvent) || 0}">
@@ -180,14 +187,18 @@ ${notes.map(oldNote).join("\n")}
 </main>
 
 <script type="module" src="/static/app.js"></script>`,
+    "legacy",
   );
 }
 
-export const readmePage = (body: string): string =>
+export const readmePage = (body: string, title = "What good means"): string =>
   shell(
-    "What good means",
-    `<header class="bar"><h1>What good means</h1><nav><a href="/">Back to the app</a></nav></header>
+    title,
+    // A written page that opens with its own heading keeps it, rather than
+    // being given a second one above it.
+    `<header class="bar">${/^\s*<h1[\s>]/.test(body) ? "" : `<h1>${escape(title)}</h1>`}<nav><a class="outline small" href="/">Back to Play</a></nav></header>
 <main id="main" class="prose">
 ${body}
 </main>`,
+    "readme",
   );

@@ -271,7 +271,7 @@ const server = createServer(async (req, res) => {
     // while leaving same-origin form posts working.
     if(invitePage)return html(res,200,await appPage({view:'invite',invitationId:invitePage[1]}),{...PRIVATE,'referrer-policy':'same-origin',...cookie(visitor)});
     if(path === '/')return html(res,200,await appPage({view:'play'}),{...PRIVATE,...cookie(visitor)});
-    if(path === '/archive')return html(res,200,readmePage(`<h1>Earlier source sketches</h1>${archiveHtml()}`),cookie(visitor));
+    if(path === '/archive')return html(res,200,readmePage(`<div class="archive">${archiveHtml()}</div>`,'Earlier source sketches'),cookie(visitor));
     if (path === "/legacy") {
       return html(res, 200, page(state(visitor)), cookie(visitor));
     }

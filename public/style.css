@@ -1,256 +1,124 @@
-/* One stylesheet, custom properties at the top, dark mode by media query.
-   Everything sizes in relative units so a browser zoom or a 200% text setting
-   doesn't clip anything --- part of holding up under unintended use. */
-:root {
-  --bg: #fbfaf7;
-  --ink: #1b1a17;
-  --dim: #6a6761;
-  --line: #ded9d0;
-  --mine: #f0ece2;
-  --accent: #2f4f4f;
-  --radius: 0.5rem;
-  color-scheme: light dark;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #15161a;
-    --ink: #eceae5;
-    --dim: #9b968d;
-    --line: #2e3037;
-    --mine: #22252c;
-    --accent: #9ec7c0;
-  }
-}
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  background: var(--bg);
-  color: var(--ink);
-  font: 1rem/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  padding: 0 1rem 4rem;
-}
-.skip {
-  position: absolute;
-  left: -9999px;
-}
-.skip:focus {
-  left: 1rem;
-  top: 1rem;
-  z-index: 10;
-  background: var(--bg);
-  padding: 0.5rem 0.75rem;
-  border: 2px solid var(--accent);
-  border-radius: var(--radius);
-}
+/* The sketchpad and the written pages, in the same clothes as the rest of
+   Ensemble. studio.css comes first and brings the type, the colours, the
+   buttons and the focus ring; this file only adds what those pages have and
+   the stage does not: a sheet of paper to read on, the old four-colour kit and
+   the traces people left. Nothing here redefines a colour of its own, so the
+   two never drift apart.
+
+   Everything sizes in relative units, so a browser zoom or a 200% text setting
+   doesn't clip anything, and the step grid is eight to a row on a phone and
+   sixteen once there is room: a bar is read in groups of four, so a row never
+   splits a group, and nothing is ever reached by dragging sideways. */
+
+/* The written pages and the sketchpad are a cream sheet on the violet wall. */
+.bar,main{width:100%;max-width:60rem;margin:0 auto}
+.page-readme .bar{max-width:46rem}
+main.prose,main#main{background:var(--cream);color:var(--ink);border-radius:22px;padding:24px 28px 32px;margin-bottom:24px}
+main.prose{max-width:46rem}
+.bar{display:flex;flex-wrap:wrap;gap:.5rem 1rem;align-items:center;padding:20px 4px 12px}
+.bar h1{font-size:1.6rem;margin:0}
+.bar__you{margin:0;color:var(--muted);font-size:.9rem}
+.bar nav{margin-left:auto;display:flex;gap:6px;order:2}
+/* A written page leads with its own heading, so the way back stands alone. */
+.bar nav:only-child{margin-left:0}
+.bar__rename{flex-basis:100%;font-size:.9rem;order:3}
+.bar__rename summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:700}
+.bar__rename form{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding-bottom:8px}
+.bar__rename label{margin:0}
+.bar__msg{color:var(--muted)}
+
+/* Inside the sheet the ink is dark, so the controls switch with it. The .paper
+   block in studio.css holds those values; this repeats only the switch. */
+main#main,main.prose{--fg:var(--ink);--muted:#584d6e;--surface:#f3e6cc;--surface-2:#e9d9b8;--line:#d4c29d;--line-strong:#8f8066;--btn:var(--ink);--btn-fg:var(--cream);--focus:#3a22c9}
+main#main a,main.prose a{color:#3a22c9;font-weight:700;text-decoration-thickness:2px;padding:2px 1px}
+main#main h2,main.prose h2{font-size:1.25rem;margin:0 0 .4em}
+main#main section{margin-top:24px}
+.hint{margin:0 0 10px;color:var(--muted);font-size:.9rem}
+.legend__note,.compose__hint,.transport__status,.trace__note,.trace__by{color:var(--muted)}
+
 /* A visible focus ring everywhere, because the artefact band names keyboard
-   use explicitly. */
-:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-.bar, main { max-width: 38rem; margin: 0 auto; }
-.bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1rem;
-  align-items: baseline;
-  padding: 1.5rem 0 1rem;
-  border-bottom: 1px solid var(--line);
-}
-.bar h1 { font-size: 1.25rem; margin: 0; letter-spacing: -0.01em; }
-.bar__you { margin: 0; color: var(--dim); font-size: 0.875rem; }
-.bar nav { margin-left: auto; font-size: 0.875rem; }
-.bar__rename { font-size: 0.875rem; flex-basis: 100%; }
-.bar__rename summary { cursor: pointer; color: var(--accent); min-height: 2.75rem; display: flex; align-items: center; }
-.bar__rename form { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding-bottom: 0.5rem; }
-.bar__rename input {
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 0.5rem 0.75rem;
-  min-height: 2.75rem;
-  min-width: 0;
-  max-width: 100%;
-}
-.bar__msg { color: var(--dim); }
-a { color: var(--accent); }
-.notice {
-  margin: 1rem 0 0;
-  padding: 0.625rem 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--mine);
-}
-.compose { margin: 1.5rem 0; display: grid; gap: 0.5rem; }
-.compose label { font-size: 0.875rem; color: var(--dim); }
-textarea {
-  width: 100%;
-  font: inherit;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 0.625rem 0.75rem;
-  resize: vertical;
-  /* A single long word with no spaces (a URL, a hash) must not push the
-     textarea wider than the viewport at 320px. */
-  overflow-wrap: anywhere;
-}
-.compose__row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin: 0; }
-button {
-  font: inherit;
-  padding: 0.5rem 1rem;
-  border-radius: var(--radius);
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: var(--bg);
-  cursor: pointer;
-  /* 44px of touch target at the small viewport. */
-  min-height: 2.75rem;
-}
-button:hover { filter: brightness(1.1); }
-.compose__hint { font-size: 0.875rem; color: var(--dim); }
-h2 { font-size: 0.875rem; font-weight: 600; color: var(--dim); text-transform: lowercase; }
-.traces { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
-.trace {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 0.75rem;
-}
-.trace--mine { background: var(--mine); border-color: var(--accent); }
-.trace__body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.trace__by { margin: 0.375rem 0 0; font-size: 0.8125rem; color: var(--dim); }
-.empty { color: var(--dim); }
-.prose { padding-top: 1rem; }
-.prose pre {
-  overflow-x: auto;
-  background: var(--mine);
-  padding: 0.75rem;
-  border-radius: var(--radius);
-}
-.prose code { font-size: 0.9em; }
-.prose img { max-width: 100%; height: auto; }
-.prose table { width: 100%; border-collapse: collapse; }
-@media (prefers-reduced-motion: no-preference) {
-  .trace { transition: background-color 0.2s ease; }
-}
+   use explicitly. studio.css rings the controls it knows about; this covers
+   the steps, the traces and anything a browser makes focusable here. */
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 
-/* --- The instrument ------------------------------------------------------
-   Four colours for the kit, chosen so each step reads at a glance and still
-   carries its sound name as text --- colour is never the only signal. */
-:root {
-  --bd: #c2563a;
-  --sd: #3a6fc2;
-  --hh: #7a8f2e;
-  --cp: #9a4fb0;
-  --step: #ece7dc;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bd: #e07a5f;
-    --sd: #6d9be0;
-    --hh: #a7bd55;
-    --cp: #c084d6;
-    --step: #262931;
-  }
-}
+.notice{margin:16px 0 0}
+.compose{margin:24px 0 0;display:grid;gap:8px}
+.compose__row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;margin:0}
+textarea{width:100%;resize:vertical;overflow-wrap:anywhere}
+textarea#body{font-family:ui-monospace,SFMono-Regular,Consolas,monospace}
 
-section { margin-top: 1.5rem; }
-h2 { margin: 0 0 0.5rem; }
-.hint { margin: 0 0 0.75rem; color: var(--dim); font-size: 0.875rem; }
-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.9em; }
+.transport{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-top:20px;padding:12px;border:2px solid var(--line);border-radius:16px;background:var(--surface)}
+.transport[hidden]{display:none}
+.transport__opt{flex-basis:100%;margin:0;font-size:.9rem}
+.transport__status{margin:0;flex-basis:100%;font-size:.85rem}
 
-.transport {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem 1rem;
-  margin-top: 1.25rem;
-  padding: 0.75rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-}
-.transport[hidden] { display: none; }
-.transport button[aria-pressed="true"] { background: var(--bg); color: var(--accent); }
-.transport__opt { display: flex; gap: 0.5rem; align-items: center; font-size: 0.875rem; }
-.transport__opt input { width: 1.125rem; height: 1.125rem; accent-color: var(--accent); }
-.transport__status { margin: 0; flex-basis: 100%; font-size: 0.8125rem; color: var(--dim); }
-
-/* Eight steps a row on a phone, sixteen once there's room: a bar is read in
-   groups of four, so a row never splits a group. */
-.grid {
-  display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
-  gap: 0.25rem;
-  margin: 0 0 0.75rem;
-}
-@media (min-width: 34rem) {
-  .grid { grid-template-columns: repeat(16, minmax(0, 1fr)); }
-}
-.step {
-  min-height: 2.75rem;
-  min-width: 0;
-  padding: 0;
-  border-radius: 0.375rem;
-  border: 1px solid var(--line);
-  background: var(--step);
-  color: var(--dim);
-  font: 600 0.75rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  display: grid;
-  place-items: center;
-  overflow: hidden;
-}
+/* Four colours for the kit, from the Ensemble palette, chosen so each step
+   reads at a glance and still carries its sound name as text --- colour is
+   never the only signal. */
+.grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:4px;margin:0 0 12px}
+@media (min-width:34rem){.grid{grid-template-columns:repeat(16,minmax(0,1fr))}}
+.step{min-height:44px;min-width:0;padding:0;border-radius:8px;border:2px solid var(--line);background:#eadcbd;color:var(--muted);font:700 .75rem/1 ui-monospace,SFMono-Regular,Consolas,monospace;display:grid;place-items:center;overflow:hidden}
 /* A small gap at every fourth step, so the beat is visible. */
-.grid > .step:nth-of-type(4n + 1):not(:first-of-type) { margin-left: 0.25rem; }
-.step--bd { background: var(--bd); border-color: var(--bd); color: #fff; }
-.step--sd { background: var(--sd); border-color: var(--sd); color: #fff; }
-.step--hh { background: var(--hh); border-color: var(--hh); color: #fff; }
-.step--cp { background: var(--cp); border-color: var(--cp); color: #fff; }
-button.step:hover { filter: brightness(1.08); }
-.step.is-now { box-shadow: 0 0 0 2px var(--ink) inset; }
+.grid>.step:nth-of-type(4n + 1):not(:first-of-type){margin-left:4px}
+.step--bd{background:var(--coral);border-color:var(--coral);color:var(--ink)}
+.step--sd{background:var(--sky);border-color:var(--sky);color:var(--ink)}
+.step--hh{background:var(--mint);border-color:var(--mint);color:var(--ink)}
+.step--cp{background:var(--pink);border-color:var(--pink);color:var(--ink)}
+button.step:hover{filter:brightness(.94)}
+.step.is-now{box-shadow:0 0 0 3px var(--ink) inset}
+.grid--readonly{gap:2px;margin:8px 0}
+.grid--readonly .step{min-height:14px;font-size:0;border-radius:3px;border-width:1px}
+.grid--readonly>.step:nth-of-type(4n + 1):not(:first-of-type){margin-left:2px}
 
-.grid--readonly { gap: 0.125rem; margin: 0.5rem 0; }
-.grid--readonly .step { min-height: 0.875rem; font-size: 0; border-radius: 0.1875rem; }
-.grid--readonly > .step:nth-of-type(4n + 1):not(:first-of-type) { margin-left: 0.125rem; }
-
-pre.trace__body {
-  margin: 0.375rem 0 0;
-  font: 0.875rem/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.trace__note { margin: 0.375rem 0 0; font-size: 0.8125rem; color: var(--dim); }
-textarea#body { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.traces{list-style:none;margin:0;padding:0;display:grid;gap:12px}
+.trace{border:2px solid var(--line);border-radius:16px;padding:12px;background:var(--surface)}
+.trace--mine{border-color:var(--line-strong)}
+.trace__body{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+.trace__by{margin:6px 0 0;font-size:.85rem}
+pre.trace__body{margin:6px 0 0;font:.875rem/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere}
+.trace__note{margin:6px 0 0;font-size:.85rem}
+.empty{color:var(--muted)}
 
 /* Notes from the first version: kept, quieter, and visibly not tracks. */
-.notes { margin-top: 1rem; }
-.notes summary { cursor: pointer; color: var(--dim); font-size: 0.875rem; min-height: 2.75rem; display: flex; align-items: center; }
-.notes .traces { margin-top: 0.5rem; }
-.trace--note p.trace__body { margin: 0.25rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.notes{margin-top:16px}
+.notes summary{cursor:pointer;min-height:44px;display:flex;align-items:center;font-weight:700}
+.notes .traces{margin-top:8px}
+.trace--note p.trace__body{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
 
-/* The kit, spelt out once beside the grid: same colours as the steps, and
-   the name always as text, so colour is never the only signal. Its own
-   class, not .step, so nothing here inherits a step button's sizing. */
-.legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem 0.5rem; margin: 0 0 0.75rem; font-size: 0.8125rem; color: var(--dim); }
-.swatch { display: inline-grid; place-items: center; min-width: 1.75rem; height: 1.25rem; padding: 0 0.25rem; border-radius: 0.25rem; background: var(--step); border: 1px solid var(--line); font: 600 0.6875rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.swatch--bd { background: var(--bd); border-color: var(--bd); color: #fff; }
-.swatch--sd { background: var(--sd); border-color: var(--sd); color: #fff; }
-.swatch--hh { background: var(--hh); border-color: var(--hh); color: #fff; }
-.swatch--cp { background: var(--cp); border-color: var(--cp); color: #fff; }
-.legend__note { flex-basis: 100%; }
+/* The kit, spelt out once beside the grid: same colours as the steps, and the
+   name always as text, so colour is never the only signal. Its own class, not
+   .step, so nothing here inherits a step button's sizing. */
+.legend{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin:0 0 12px;font-size:.85rem}
+.swatch{display:inline-grid;place-items:center;min-width:1.75rem;height:1.25rem;padding:0 4px;border-radius:5px;background:#eadcbd;border:1px solid var(--line-strong);font:700 .6875rem/1 ui-monospace,SFMono-Regular,Consolas,monospace;color:var(--ink)}
+.swatch--bd{background:var(--coral);border-color:var(--coral)}
+.swatch--sd{background:var(--sky);border-color:var(--sky)}
+.swatch--hh{background:var(--mint);border-color:var(--mint)}
+.swatch--cp{background:var(--pink);border-color:var(--pink)}
+.legend__note{flex-basis:100%}
 
 /* Step numbers, drawn inside each of your own step buttons by a counter, so
    they can't drift from the button they name at any width. The buttons'
    aria-labels already say "Step n", so screen readers take that, not this. */
-[data-grid] { counter-reset: step; }
-[data-grid] .step { counter-increment: step; position: relative; }
-[data-grid] .step::before {
-  content: counter(step);
-  position: absolute;
-  top: 0.125rem;
-  left: 0.1875rem;
-  font: 500 0.5625rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  opacity: 0.6;
+[data-grid]{counter-reset:step}
+[data-grid] .step{counter-increment:step;position:relative}
+[data-grid] .step::before{content:counter(step);position:absolute;top:2px;left:3px;font:500 .5625rem/1 ui-monospace,SFMono-Regular,Consolas,monospace;opacity:.6}
+
+/* Written pages: long source lines wrap rather than push the page sideways. */
+.prose pre{background:var(--ink);color:#f7efdc;padding:12px 14px;border-radius:12px;white-space:pre-wrap;overflow-wrap:anywhere;overflow-x:auto}
+.prose pre code{color:inherit}
+.prose code{overflow-wrap:anywhere}
+.prose p code,.prose li code{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:1px 4px}
+.prose img{max-width:100%;height:auto}
+.prose table{width:100%;border-collapse:collapse;display:block;overflow-x:auto}
+.prose th,.prose td{border:1px solid var(--line);padding:6px 10px;text-align:left}
+.prose h1,.prose h2,.prose h3{margin-top:1.2em}
+.archive article{border:2px solid var(--line);border-radius:16px;padding:12px;margin:12px 0;background:var(--surface)}
+.archive pre{white-space:pre-wrap;overflow-wrap:anywhere}
+
+@media (max-width:760px){
+  main.prose,main#main{border-radius:18px;padding:16px 16px 24px}
+  .bar{padding:12px 4px 8px}.bar h1{font-size:1.35rem}
+}
+@media (prefers-reduced-motion:no-preference){
+  .trace{transition:background-color .2s ease}
 }
