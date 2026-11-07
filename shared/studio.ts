@@ -1,10 +1,11 @@
 import type {AnyDocument} from './clip.ts';
 import type {Plan,Slot} from './performance.ts';
 import type {Role} from './presets.ts';
+import type {Look} from './look.ts';
 
 export type Clip = {id:string;slot:Slot;revision:number;schemaVersion:1|2;document:AnyDocument;source:string;provenance:Record<string,unknown>;editedBy:{id:string;handle:string};editedAt:number;history?:{revision:number;createdAt:number;by:string}[]};
 export type Lease = {visitorId:string;handle:string;until:number};
-export type Part = {id:string;name:string;role:Role|'custom';presetId:string|null;presetVersion:number|null;addedBy:{id:string;handle:string};revision:number;archivedAt:number|null;guest:boolean;clips:Partial<Record<Slot,Clip>>;lease:Lease|null};
+export type Part = {id:string;name:string;role:Role|'custom';look:Look|null;characterId:string|null;presetId:string|null;presetVersion:number|null;addedBy:{id:string;handle:string};revision:number;archivedAt:number|null;guest:boolean;clips:Partial<Record<Slot,Clip>>;lease:Lease|null};
 export type Member = {id:string;handle:string;code:string;role:'owner'|'member';online:boolean;here:boolean};
 export type Arrangement = {entries:{scene:Slot;bars:number}[];loop:boolean};
 export type Visibility = 'private'|'unlisted'|'public';
@@ -18,7 +19,7 @@ export type RoomSnapshot = {
   editors:{count:number;limit:number;youCanEdit:boolean;reason?:string};
   viewToken:string|null;
 };
-export type ViewPart = {id:string;name:string;role:Role|'custom';addedBy:string;document:AnyDocument;source:string;gain:number;mute:boolean};
+export type ViewPart = {id:string;name:string;role:Role|'custom';look:Look|null;addedBy:string;document:AnyDocument;source:string;gain:number;mute:boolean};
 export type ViewSnapshot = {access:'view';id:string;title:string;visibility:Visibility;bpm:number;parts:ViewPart[];performance:null|{id:string;title:string}};
 // What an audience sees: the performance's active plan, credits and audience
 // presence. Never the project snapshot.
@@ -26,7 +27,7 @@ export type AudienceSnapshot = {
   id:string;projectId:string|null;title:string;projectTitle:string;visibility:'public'|'unlisted';status:'live'|'ended';endReason:string|null;
   serverNowMs:number;eventId:number;bpm:number;transport:{status:'stopped'|'playing';epochMs:number|null;generation:number};
   plans:Plan[];performers:{id:string;handle:string;role:string}[];
-  parts:{id:string;name:string;role:Role|'custom';addedBy:string;ownerId:string;guest:boolean}[];
+  parts:{id:string;name:string;role:Role|'custom';look:Look|null;addedBy:string;ownerId:string;guest:boolean}[];
   yourParts:GuestPart[];
   audience:number;capacity:number;full:boolean;
   you:{id:string;handle:string;code:string;role:'host'|'member'|'performer'|'listener';muted:boolean;request:string|null};
@@ -36,3 +37,9 @@ export type AudienceSnapshot = {
 export type Snapshot = RoomSnapshot;
 // Exact saved source belongs only to the guest who owns this session part.
 export type GuestPart = {id:string;name:string;role:Role|'custom';presetId:string|null;source:string;revision:number};
+// A character as it can be saved and shared: a versioned document holding the
+// look, the sound and the credit, and nothing about any mix it came from.
+export type CharacterCredit = {creator:string;remixOf:null|{id:string|null;name:string;by:string}};
+export type CharacterDocument = {format:'ensemble-character';version:1;name:string;role:Role|null;look:Look;source:string;level:number;credit:CharacterCredit};
+export type SavedCharacter = {id:string;name:string;role:Role|'custom';look:Look;source:string;level:number;revision:number;credit:CharacterCredit;ownerHandle:string;mine:boolean;visibility:'private'|'unlisted'|'public';updatedAt:number;document:CharacterDocument;
+  listed?:boolean;publishedRevision?:number|null;publishedAt?:number|null;changedSinceListing?:boolean;shareToken?:string|null};

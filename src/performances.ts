@@ -11,11 +11,13 @@ import {addEvent,broadcast,openStream,revalidate,scopeListeners} from './hub.ts'
 import {announce,setHost,onHostlessPerformance,replan,chatRow,chatBody,editCapacity,heartbeat,ROOM_LIMITS} from './studio.ts';
 import {parseSource} from '../shared/expr.ts';
 import {presetById,roleOf} from '../shared/presets.ts';
+import {validLook} from '../shared/look.ts';
+import {characterForPart} from './characters.ts';
 import {SLOTS,publishedPlan,type Plan} from '../shared/performance.ts';
 import type {AudienceSnapshot,GuestPart} from '../shared/studio.ts';
 
 type Row=Record<string,any>;
-export const LIVE_LIMITS={listeners:32,reactionsPerSecond:2,chatRetentionDays:7};
+export const LIVE_LIMITS={listeners:32,reactionsPerSecond:2,reactionFlushMs:250,chatRetentionDays:7};
 const REACTIONS=['clap','heart','fire','wave'];
 const handleOf=(id:string)=>one('select handle from visitor where id=?',id)?.handle??'someone';
 const listenersOf=(id:string)=>new Set(scopeListeners(`audience:${id}`).map(l=>l.visitorId));
@@ -87,7 +89,7 @@ export function audienceSnapshot(v:Visitor,performanceId:string):AudienceSnapsho
   // carries it, at the bar that change takes effect. Source, history,
   // provenance, drafts, members and chat are never included.
   const plans=live?plansFor(p.project_id,t.generation).map(publishedPlan):[];
-  const parts=live?rows('select t.id,t.owner_id,t.name,t.role,t.guest_performance_id,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null order by t.position',p.project_id).map(x=>({id:x.id,name:x.name,role:roleOf(x.role),addedBy:x.handle,ownerId:x.owner_id,guest:!!x.guest_performance_id})):[];
+  const parts=live?rows('select t.id,t.owner_id,t.name,t.role,t.look_json,t.preset_id,t.guest_performance_id,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null order by t.position',p.project_id).map(x=>({id:x.id,name:x.name,role:roleOf(x.role),look:(x.look_json?validLook(JSON.parse(x.look_json)):null)??(x.preset_id?presetById(x.preset_id)?.look??null:null),addedBy:x.handle,ownerId:x.owner_id,guest:!!x.guest_performance_id})):[];
   // A separate, actor-filtered editing view: never reuse the project snapshot
   // or send another guest's verbatim source/history to this visitor.
   const yourParts:GuestPart[]=live&&a.role==='performer'?rows("select t.id,t.name,t.role,t.preset_id,r.source_text,c.current_revision from track t join clip c on c.track_id=t.id and c.slot='A' join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where t.guest_performance_id=? and t.owner_id=? and t.archived_at is null order by t.position",p.id,v.id).map(x=>({id:x.id,name:x.name,role:roleOf(x.role),presetId:x.preset_id,source:x.source_text,revision:x.current_revision})):[];
@@ -143,12 +145,30 @@ export function sendPerformanceChat(v:Visitor,performanceId:string,input:Row){
     return {message:chatRow(one('select c.*,v.handle from performance_chat c join visitor v on v.id=c.visitor_id where c.id=?',id)!)};
   });
 }
-// Reactions are not stored: a rate-limited broadcast, gone once shown.
+// Reactions are not stored and are not sent one by one. Each is rate-limited,
+// counted in memory and sent as one small total a few times a second, so a whole
+// audience clapping costs a performer's page a handful of events, whatever its
+// size. The audience stream and the project's member stream both receive it: the
+// members are the people on stage. A performance that has ended sends nothing.
+const reactionTotals=new Map<string,{projectId:string;counts:Record<string,number>}>();
+let reactionTimer:ReturnType<typeof setTimeout>|null=null;
+function flushReactions(){
+  reactionTimer=null;
+  for(const [performanceId,{projectId,counts}] of reactionTotals){
+    if(one('select status from performance where id=?',performanceId)?.status!=='live')continue;
+    const payload={counts};
+    broadcast(`audience:${performanceId}`,0,'reaction',payload);broadcast(`member:${projectId}`,0,'reaction',payload);
+  }
+  reactionTotals.clear();
+}
 export function react(v:Visitor,performanceId:string,reaction:unknown){
   const a=readPerformance(v,performanceId);need(a.performance.status==='live','This performance has ended.',410);
   need(REACTIONS.includes(reaction as string),'Choose a reaction.');
   limit(`react:${v.id}`,4,LIVE_LIMITS.reactionsPerSecond,'Easy on the applause.');
-  broadcast(`audience:${performanceId}`,0,'reaction',{reaction});return {ok:true};
+  const total=reactionTotals.get(performanceId)??{projectId:a.performance.project_id as string,counts:{}};
+  total.counts[reaction as string]=(total.counts[reaction as string]??0)+1;reactionTotals.set(performanceId,total);
+  reactionTimer??=setTimeout(flushReactions,LIVE_LIMITS.reactionFlushMs);
+  return {ok:true};
 }
 
 // --- performers, requests and moderation --------------------------------------------------------
@@ -230,12 +250,13 @@ export function guestCommand(v:Visitor,performanceId:string,input:Row){
     if(type==='guest.add'){
       need(Number(one('select count(*) as n from track where project_id=? and archived_at is null',p.project_id)!.n)<ROOM_LIMITS.parts,`The stage has room for ${ROOM_LIMITS.parts} parts.`,409);
       need(Number(one('select count(*) as n from track where guest_performance_id=? and owner_id=? and archived_at is null',p.id,v.id)!.n)<3,'Guest performers bring up to three parts.',409);
-      let name:string,role:string|null=null,source:string,provenance:Row;
-      if(typeof payload.presetId==='string'){const pr=presetById(payload.presetId);need(pr,'That sound is not in the catalogue.',404);name=pr!.name;role=pr!.role;source=pr!.source;provenance={preset:{id:pr!.id,version:pr!.version},guest:true};}
+      let name:string,role:string|null=null,source:string,provenance:Row,look:unknown=null;
+      if(typeof payload.presetId==='string'){const pr=presetById(payload.presetId);need(pr,'That sound is not in the catalogue.',404);name=pr!.name;role=pr!.role;source=pr!.source;look=pr!.look;provenance={preset:{id:pr!.id,version:pr!.version},guest:true};}
+      else if(typeof payload.characterId==='string'){const c=characterForPart(v,payload.characterId);name=c.name;role=c.role;source=c.source;look=c.look;provenance={...c.provenance,guest:true};}
       else{source=code(payload.source);name=text(payload.name??'Guest part',40,'the part a name');provenance={via:'code',guest:true};}
       const doc=guestDocument(source);entityId=randomUUID();
       const position=Number(one('select coalesce(max(position),-1)+1 as p from track where project_id=?',p.project_id)!.p);
-      run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,guest_performance_id) values(?,?,?,?,?,1,null,?,?,?,?)',entityId,p.project_id,v.id,name,position,role,typeof payload.presetId==='string'?payload.presetId:null,typeof payload.presetId==='string'?1:null,p.id);
+      run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,guest_performance_id,look_json) values(?,?,?,?,?,1,null,?,?,?,?,?)',entityId,p.project_id,v.id,name,position,role,typeof payload.presetId==='string'?payload.presetId:null,typeof payload.presetId==='string'?1:null,p.id,look?JSON.stringify(look):null);
       const clipId=randomUUID();run('insert into clip values(?,?,?,1)',clipId,entityId,'A');run('insert into clip_revision values(?,1,2,?,?,?,?,?)',clipId,JSON.stringify(doc),source,JSON.stringify(provenance),v.id,now);
       for(const s of SLOTS)run('insert into scene_assignment values(?,?,?,?)',p.project_id,s,entityId,'A');
     }else{

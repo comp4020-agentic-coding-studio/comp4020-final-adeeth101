@@ -11,7 +11,8 @@ import { cleanHandle, cookieHeader, identify, persist, rename, type Visitor } fr
 import { act, state } from "./feature.ts";
 import { record, stream } from "./events.ts";
 import { page, readmePage } from "./page.ts";
-import {createProject,command,snapshot,projectStream,roomHeartbeat,exportProject,importProject,projectChat,sendProjectChat,deleteProjectChat,mySounds,saveSound,deleteSound,myProjects,publicProjects,heartbeat,CommandError} from './studio.ts';
+import {createProject,command,snapshot,projectStream,roomHeartbeat,exportProject,importProject,projectChat,sendProjectChat,deleteProjectChat,myProjects,deletedProjects,restoreProject,purgeProject,publicProjects,heartbeat,CommandError} from './studio.ts';
+import {mySounds,saveSound,deleteSound,myCharacters,getCharacter,publicCharacters,createCharacter,updateCharacter,deleteCharacter,copyCharacter,publishCharacter,unpublishCharacter,rotateCharacterLink,redeemCharacterLink} from './characters.ts';
 import {friendsView,friendAction,notifications,clearNotification,accountStream,createInvitation,listInvitations,revokeInvitation,previewInvitation,acceptInvitation,redeemViewLink,redeemListenLink,makeRecovery,recover,me} from './social.ts';
 import {startPerformance,endPerformance,audienceSnapshot,audienceStream,livePerformances,performanceChat,sendPerformanceChat,react,moderate,rotateListenLink,guestCommand} from './performances.ts';
 import {closeAll} from './hub.ts';
@@ -163,13 +164,31 @@ const server = createServer(async (req, res) => {
       if(wantsHtml(req)){res.writeHead(303,{location:`/p/${result.id}?new=1`,...cookie(visitor)});return res.end();}
       return ok(result,201);
     }
-    if(path === '/api/projects' && method === 'GET')return ok({projects:myProjects(visitor)});
+    if(path === '/api/projects' && method === 'GET')return ok({projects:myProjects(visitor),deleted:deletedProjects(visitor)});
     if(path === '/api/discover' && method === 'GET')return ok({projects:publicProjects(Number(url.searchParams.get('page')??0))});
     if(path === '/api/live' && method === 'GET')return ok({performances:livePerformances(Number(url.searchParams.get('page')??0))});
     if(path === '/api/presets' && method === 'GET')return json(res,200,{packs:PACKS},{'cache-control':'no-cache'});
     if(path === '/api/import' && method === 'POST')return ok(importProject(visitor,await readJson(req,512*1024)),201);
     if(path === '/api/sounds'){if(method==='GET')return ok({sounds:mySounds(visitor)});if(method==='POST')return ok(saveSound(visitor,await readJson(req)),201);}
     const sound=path.match(/^\/api\/sounds\/([0-9a-f-]+)\/delete$/);if(sound&&method==='POST')return ok(deleteSound(visitor,sound[1]));
+    if(path === '/api/characters'){if(method==='GET')return ok({characters:myCharacters(visitor)});if(method==='POST')return ok(createCharacter(visitor,await readJson(req)),201);}
+    if(path === '/api/library' && method === 'GET')return ok(publicCharacters(visitor,Number(url.searchParams.get('page')??0),url.searchParams.get('q'),url.searchParams.get('role')));
+    const apiCharacter=path.match(/^\/api\/characters\/([0-9a-f-]+)(?:\/(delete|copy|publish|unpublish|rotate-link|share-link))?$/);
+    if(apiCharacter){
+      const [,cid,action]=apiCharacter;
+      if(!action&&method==='GET')return ok(getCharacter(visitor,cid));
+      if(method==='POST'){
+        const body=await readJson(req);
+        if(!action)return ok(updateCharacter(visitor,cid,body));
+        if(action==='delete')return ok(deleteCharacter(visitor,cid));
+        if(action==='copy')return ok(copyCharacter(visitor,cid,body),201);
+        if(action==='publish')return ok(publishCharacter(visitor,cid,body));
+        if(action==='unpublish')return ok(unpublishCharacter(visitor,cid));
+        if(action==='rotate-link')return ok(rotateCharacterLink(visitor,cid));
+        if(action==='share-link')return ok(redeemCharacterLink(visitor,cid,body.token));
+      }
+      return json(res,405,{error:'Method not allowed.'});
+    }
     if(path === '/api/friends'){if(method==='GET')return ok(friendsView(visitor));if(method==='POST')return ok(friendAction(visitor,await readJson(req)));}
     if(path === '/api/notifications' && method==='GET')return ok({notifications:notifications(visitor)});
     const note=path.match(/^\/api\/notifications\/(\d+)\/clear$/);if(note&&method==='POST')return ok(clearNotification(visitor,Number(note[1])));
@@ -189,7 +208,7 @@ const server = createServer(async (req, res) => {
       if(act2==='revoke')return ok(revokeInvitation(visitor,iid));
       return ok(acceptInvitation(visitor,iid,body.token,act2==='decline'));
     }
-    const apiProject=path.match(/^\/api\/projects\/([0-9a-f-]+)(?:\/(commands|events|presence|export|chat|invitations|view-link|go-live))?$/);
+    const apiProject=path.match(/^\/api\/projects\/([0-9a-f-]+)(?:\/(commands|events|presence|export|chat|invitations|view-link|go-live|restore|purge))?$/);
     if(apiProject){
       const [,id,action]=apiProject;
       if(!action && method==='GET')return ok(snapshot(visitor,id));
@@ -202,7 +221,9 @@ const server = createServer(async (req, res) => {
       if(action==='invitations'&&method==='GET')return ok({invitations:listInvitations(visitor,'project',id)});
       if(action==='view-link'&&method==='POST')return ok(redeemViewLink(visitor,id,(await readJson(req)).token));
       if(action==='go-live'&&method==='POST')return ok(startPerformance(visitor,id,await readJson(req)),201);
-      return json(res,405,{error:'Method not allowed.'},{allow:['commands','presence','view-link','go-live'].includes(action)?'POST':'GET'});
+      if(action==='restore'&&method==='POST')return ok(restoreProject(visitor,id));
+      if(action==='purge'&&method==='POST')return ok(purgeProject(visitor,id,await readJson(req)));
+      return json(res,405,{error:'Method not allowed.'},{allow:['commands','presence','view-link','go-live','restore','purge'].includes(action)?'POST':'GET'});
     }
     const apiPerf=path.match(/^\/api\/performances\/([0-9a-f-]+)(?:\/(events|chat|react|moderate|end|listen-link|rotate-link|commands|invitations))?$/);
     if(apiPerf){
@@ -238,6 +259,11 @@ const server = createServer(async (req, res) => {
     if(livePage){const a=performanceAccess(visitor,livePage[1]);return html(res,200,await appPage({view:'audience',performanceId:livePage[1],title:a?.performance.title}),{...PRIVATE,...cookie(visitor)});}
     if(path==='/live')return html(res,200,await appPage({view:'live'}),{...PRIVATE,...cookie(visitor)});
     if(path==='/friends')return html(res,200,await appPage({view:'friends'}),{...PRIVATE,...cookie(visitor)});
+    if(path==='/characters')return html(res,200,await appPage({view:'characters'}),{...PRIVATE,...cookie(visitor)});
+    // A share link carries its token in the fragment, so this page says nothing
+    // about whether the character exists; the client exchanges the token by POST.
+    const characterPage=path.match(/^\/c\/([0-9a-f-]+)$/);
+    if(characterPage)return html(res,200,await appPage({view:'character',characterId:characterPage[1]}),{...PRIVATE,'referrer-policy':'same-origin',...cookie(visitor)});
     if(path==='/discover')return html(res,200,await appPage({view:'discover'}),{...PRIVATE,...cookie(visitor)});
     const invitePage=path.match(/^\/invite\/([0-9a-f-]+)$/);
     // The invitation token is in the fragment, which is never sent anywhere;

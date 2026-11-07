@@ -4,6 +4,7 @@
 import {DatabaseSync} from 'node:sqlite';
 import {randomBytes} from 'node:crypto';
 import {db} from './db.ts';
+import {defaultLook} from '../shared/look.ts';
 
 db.exec(`create table if not exists studio_migration (version integer primary key, applied_at integer not null)`);
 const applied=(v:number)=>!!db.prepare('select version from studio_migration where version=?').get(v);
@@ -98,6 +99,29 @@ if(!applied(2)){
   create index user_sound_owner on user_sound(visitor_id,created_at);
   insert into studio_migration values(2,strftime('%s','now')*1000);
   commit;`);
+}
+
+// Migration 3: characters and deletion. A part gains its own stored look and a
+// note of the character it was copied from; old parts have neither and keep
+// drawing from their preset or id. Mixes can be deleted without losing their
+// rows. Saved sounds become characters with their ids unchanged, so a part
+// that names one still finds it. No source, revision or credit is rewritten, and
+// user_sound itself is left in place.
+if(!applied(3)){
+  if(file()&&count('select count(*) as n from project')>0)verifiedBackup('characters',['project','track','clip','clip_revision','user_sound','visitor','project_member','project_chat','performance','invitation']);
+  db.exec('begin immediate');
+  try{
+    db.exec(`alter table project add column deleted_at integer;
+    alter table track add column look_json text;
+    alter table track add column character_id text;
+    create table character (id text primary key,owner_id text not null references visitor(id),name text not null,role text,look_json text not null,source text not null,level real not null default 0.7,revision integer not null default 1,creator_id text not null,creator_handle text not null,remix_of_id text,remix_of_name text,remix_of_by text,visibility text not null default 'private',link_version integer not null default 1,published_json text,published_name text,published_role text,published_revision integer,published_at integer,created_at integer not null,updated_at integer not null,deleted_at integer);
+    create index character_owner on character(owner_id,deleted_at,updated_at);
+    create index character_listing on character(visibility,deleted_at,published_at);`);
+    const add=db.prepare(`insert into character(id,owner_id,name,role,look_json,source,level,revision,creator_id,creator_handle,visibility,created_at,updated_at) values(?,?,?,?,?,?,0.7,1,?,?,'private',?,?)`);
+    for(const s of db.prepare('select u.*,v.handle from user_sound u join visitor v on v.id=u.visitor_id').all() as Record<string,any>[])add.run(s.id,s.visitor_id,s.name,s.role,JSON.stringify(defaultLook(s.role??'custom',s.id)),s.source,s.visitor_id,s.handle,s.created_at,s.created_at);
+    db.prepare('insert into studio_migration values(3,?)').run(Date.now());
+    db.exec('commit');
+  }catch(e){db.exec('rollback');throw e;}
 }
 
 // Friend codes are public and short: a handle plus code tells two people with

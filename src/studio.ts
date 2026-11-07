@@ -16,6 +16,8 @@ import {parseCode} from '../shared/code.ts';
 import {validateAny,sourceOf,type AnyDocument} from '../shared/clip.ts';
 import {parseSource} from '../shared/expr.ts';
 import {presetById,roleOf,ROLES} from '../shared/presets.ts';
+import {validLook,type Look} from '../shared/look.ts';
+import {characterForPart} from './characters.ts';
 import {blankPlan,nextBoundary,sceneAt,cycleAt,planAt,planAtRestart,SLOTS,type Slot,type Plan} from '../shared/performance.ts';
 import type {RoomSnapshot,ViewSnapshot,Part,Arrangement,Member} from '../shared/studio.ts';
 
@@ -78,12 +80,16 @@ export function createProject(v:Visitor,rawTitle:unknown){
 export function myProjects(v:Visitor){
   return rows(`select p.id,p.title,p.visibility,p.updated_at as updatedAt,m.role,(select count(*) from track t where t.project_id=p.id and t.archived_at is null and t.guest_performance_id is null) as parts,
     (select count(*) from project_member x where x.project_id=p.id and x.removed_at is null) as members
-    from project_member m join project p on p.id=m.project_id where m.visitor_id=? and m.removed_at is null order by p.updated_at desc limit 50`,v.id);
+    from project_member m join project p on p.id=m.project_id where m.visitor_id=? and m.removed_at is null and p.deleted_at is null order by p.updated_at desc limit 50`,v.id);
+}
+// Only the owner sees a deleted mix, to restore it or delete it for good.
+export function deletedProjects(v:Visitor){
+  return rows(`select p.id,p.title,p.deleted_at as deletedAt from project_member m join project p on p.id=m.project_id where m.visitor_id=? and m.role='owner' and m.removed_at is null and p.deleted_at is not null order by p.deleted_at desc limit 50`,v.id);
 }
 export function publicProjects(page:number){
   const offset=Math.max(0,Math.floor(page))*24;
   return rows(`select p.id,p.title,p.updated_at as updatedAt,(select count(*) from track t where t.project_id=p.id and t.archived_at is null and t.guest_performance_id is null) as parts
-    from project p where p.visibility='public' order by p.updated_at desc limit 25 offset ?`,offset);
+    from project p where p.visibility='public' and p.deleted_at is null order by p.updated_at desc limit 25 offset ?`,offset);
 }
 
 // --- plans ----------------------------------------------------------------
@@ -141,8 +147,8 @@ export function setHost(projectId:string,visitorId:string|null,now=Date.now()){
   return perf;
 }
 
-function startTransport(id:string,t:Row,now:number){
-  const p=structuredClone(plansFor(id,t.generation).at(-1)??blankPlan());p.generation=t.generation+1;p.planRevision=0;p.effectiveCycle=0;p.arrangement=null;syncCatalog(id,p);
+function startTransport(id:string,t:Row,now:number,sequence:Arrangement|null=null){
+  const p=structuredClone(plansFor(id,t.generation).at(-1)??blankPlan());p.generation=t.generation+1;p.planRevision=0;p.effectiveCycle=0;p.arrangement=sequence?{...sequence,startCycle:0}:null;syncCatalog(id,p);
   run("update transport set status='playing',epoch_ms=?,generation=generation+1,revision=revision+1 where project_id=?",now+1200,id);savePlan(id,p);
   run('delete from performance_plan where project_id=? and generation<?',id,t.generation+1);
 }
@@ -174,9 +180,11 @@ function clipsOf(trackId:string,history:boolean){
       ...(history?{history:rows('select r.revision,r.created_at as createdAt,v.handle as by from clip_revision r join visitor v on v.id=r.created_by where clip_id=? order by revision desc limit 20',c.id)}:{})}];
   }));
 }
+// A part's own stored look, or, for one saved before looks existed, its preset's.
+const lookOf=(t:Row):Look|null=>(t.look_json?validLook(JSON.parse(t.look_json)):null)??(t.preset_id?presetById(t.preset_id)?.look??null:null);
 function partsOf(id:string,includeArchived:boolean):Part[]{
   return rows(`select t.*,v.handle,v.friend_code from track t join visitor v on v.id=t.owner_id where t.project_id=? ${includeArchived?'':'and t.archived_at is null'} and (t.guest_performance_id is null or t.archived_at is null) order by t.position`,id).map(t=>({
-    id:t.id,name:t.name,role:roleOf(t.role),presetId:t.preset_id,presetVersion:t.preset_version,addedBy:{id:t.owner_id,handle:t.handle},revision:t.revision,archivedAt:t.archived_at,guest:!!t.guest_performance_id,clips:clipsOf(t.id,true),lease:leaseOf(t.id)}));
+    id:t.id,name:t.name,role:roleOf(t.role),look:lookOf(t),characterId:t.character_id??null,presetId:t.preset_id,presetVersion:t.preset_version,addedBy:{id:t.owner_id,handle:t.handle},revision:t.revision,archivedAt:t.archived_at,guest:!!t.guest_performance_id,clips:clipsOf(t.id,true),lease:leaseOf(t.id)}));
 }
 function settingsOf(id:string){const s=one('select * from project_settings where project_id=?',id)!;return {bpm:s.bpm,sceneNames:JSON.parse(s.scene_names_json),arrangement:JSON.parse(s.arrangement_json) as Arrangement,revision:s.settings_revision};}
 function transportOf(id:string,now:number){const t=one('select * from transport where project_id=?',id)!;const hostId=t.lease_until>now?t.conductor_id:null;return {generation:t.generation,status:t.status,epochMs:t.epoch_ms,hostId,hostHandle:hostId?handleOf(hostId):null,leaseUntil:t.lease_until,revision:t.revision};}
@@ -204,10 +212,10 @@ export function viewSnapshot(v:Visitor,id:string):ViewSnapshot{
   const plan=plansFor(id,t.generation).at(-1)??blankPlan();
   const perf=livePerformance(id);
   return {access:'view',id,title:p.title,visibility:p.visibility,bpm:settingsOf(id).bpm,
-    parts:rows("select t.id,t.name,t.role,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null and t.guest_performance_id is null order by t.position",id).map(t=>{
+    parts:rows("select t.id,t.name,t.role,t.look_json,t.preset_id,v.handle from track t join visitor v on v.id=t.owner_id where t.project_id=? and t.archived_at is null and t.guest_performance_id is null order by t.position",id).map(t=>{
       const c=one("select c.current_revision,r.document_json,r.source_text from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where c.track_id=? and c.slot='A'",t.id);
       const document=c?JSON.parse(c.document_json):emptyClip();
-      return {id:t.id,name:t.name,role:roleOf(t.role),addedBy:t.handle,document,source:sourceOf(document,c?.source_text),gain:plan.mix[t.id]?.gain??0.7,mute:plan.mix[t.id]?.mute??false};
+      return {id:t.id,name:t.name,role:roleOf(t.role),look:lookOf(t),addedBy:t.handle,document,source:sourceOf(document,c?.source_text),gain:plan.mix[t.id]?.gain??0.7,mute:plan.mix[t.id]?.mute??false};
     }),
     performance:perf&&perf.visibility==='public'?{id:perf.id,title:perf.title}:null};
 }
@@ -240,7 +248,7 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
   const id=a.project.id as string,now=Date.now(),owner=a.role==='owner';
   const t=one('select * from transport where project_id=?',id)!,settings=one('select * from project_settings where project_id=?',id)!;
   const hostId=t.lease_until>now?t.conductor_id:null,isHost=hostId===v.id;
-  let entityId:string|null=null,entityRevision=0,effectiveCycle:number|undefined,kind=type,view=false,audience=false,changed=true;
+  let entityId:string|null=null,entityRevision=0,effectiveCycle:number|undefined,kind=type,view=false,audience=false,changed=true,closeStreams=false;
   const version=(row:Row,key='revision')=>{if(expected!==undefined&&row[key]!==expected)throw new CommandError('This changed in another session. Your draft is safe.',409,row);};
   const plan=(edit?:(p:Plan)=>void)=>{effectiveCycle=updatePlan(id,one('select * from transport where project_id=?',id)!,settings.bpm,edit);audience=true;view=true;};
   const host=()=>need(isHost,hostId?`${handleOf(hostId)} is hosting. Ask them, or wait for the host role to free up.`:'Take the host role first.',403);
@@ -259,24 +267,27 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
     run('delete from clip_revision where clip_id=? and revision<=?',clipId,revision-ROOM_LIMITS.revisionsKept);
     entityId=tr.id;entityRevision=revision;
   };
-  const newPart=(name:string,role:string|null,presetId:string|null,presetVersion:number|null,source:string,provenance:Row,owner:string=v.id,guest:string|null=null)=>{
+  const newPart=(name:string,role:string|null,presetId:string|null,presetVersion:number|null,source:string,provenance:Row,owner:string=v.id,guest:string|null=null,look:Look|null=null,characterId:string|null=null)=>{
     const doc=parseSource(source).document,trackId=randomUUID(),position=Number(one('select coalesce(max(position),-1)+1 as p from track where project_id=?',id)!.p);
-    run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,guest_performance_id) values(?,?,?,?,?,1,null,?,?,?,?)',trackId,id,owner,name,position,role,presetId,presetVersion,guest);
+    run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,guest_performance_id,look_json,character_id) values(?,?,?,?,?,1,null,?,?,?,?,?,?)',trackId,id,owner,name,position,role,presetId,presetVersion,guest,look?JSON.stringify(look):null,characterId);
     const clipId=randomUUID();run('insert into clip values(?,?,?,1)',clipId,trackId,'A');
     run('insert into clip_revision values(?,1,2,?,?,?,?,?)',clipId,JSON.stringify(doc),source,JSON.stringify(provenance),v.id,now);
     for(const s of SLOTS)run('insert into scene_assignment values(?,?,?,?)',id,s,trackId,'A');
     entityId=trackId;entityRevision=1;return trackId;
   };
-  const sound=(p:any)=>{
-    if(typeof p.presetId==='string'){const preset=presetById(p.presetId,typeof p.presetVersion==='number'?p.presetVersion:undefined);need(preset,'That sound is not in the catalogue.',404);return {name:preset!.name,role:preset!.role,presetId:preset!.id,presetVersion:preset!.version,source:preset!.source,provenance:{preset:{id:preset!.id,version:preset!.version}}};}
-    if(typeof p.soundId==='string'){const s=one('select * from user_sound where id=? and visitor_id=?',p.soundId,v.id);need(s,'That saved sound is not yours or no longer exists.',404);return {name:s!.name,role:s!.role,presetId:null,presetVersion:null,source:s!.source,provenance:{sound:{id:s!.id,...JSON.parse(s!.attribution_json)}}};}
+  type Sound={name:string;role:string|null;presetId:string|null;presetVersion:number|null;source:string;provenance:Row;look:Look|null;characterId:string|null;level?:number};
+  const sound=(p:any):Sound=>{
+    if(typeof p.presetId==='string'){const preset=presetById(p.presetId,typeof p.presetVersion==='number'?p.presetVersion:undefined);need(preset,'That sound is not in the catalogue.',404);return {name:preset!.name,role:preset!.role,presetId:preset!.id,presetVersion:preset!.version,source:preset!.source,look:preset!.look,characterId:null,provenance:{preset:{id:preset!.id,version:preset!.version}}};}
+    // A saved sound is a saved character under an older name.
+    const saved=typeof p.characterId==='string'?p.characterId:typeof p.soundId==='string'?p.soundId:null;
+    if(saved){const c=characterForPart(v,saved);return {...c,presetId:null,presetVersion:null};}
     const source=code(p.source),name=text(p.name??'My part',40,'the part a name');parseSource(source);
-    return {name,role:(ROLES as readonly string[]).includes(p.role)?p.role:null,presetId:null,presetVersion:null,source,provenance:{via:'code'}};
+    return {name,role:(ROLES as readonly string[]).includes(p.role)?p.role:null,presetId:null,presetVersion:null,source,look:validLook(p.look),characterId:null,provenance:{via:'code'}};
   };
   switch(type){
     case 'part.add':{
       capacity();claimEditing(id,v);const s=sound(payload);
-      newPart(s.name,s.role,s.presetId,s.presetVersion,s.source,s.provenance);plan();
+      const added=newPart(s.name,s.role,s.presetId,s.presetVersion,s.source,s.provenance,v.id,null,s.look,s.characterId);plan(p=>{if(s.level!==undefined)p.mix[added]={gain:s.level,mute:false};});
       // "Add and play": the host's first addition may start the shared mix.
       if(payload.play===true&&t.status==='stopped'&&(isHost||!hostId)){
         setHost(id,v.id,now);
@@ -291,7 +302,7 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
         writeRevision(tr,s,doc,source,{via:payload.via==='shape'?'shape':'code',...(tr.preset_id?{basedOn:{preset:tr.preset_id,version:tr.preset_version}}:{})});
       }else if(type==='part.swap'){
         const n=sound(payload);writeRevision(tr,s,parseSource(n.source).document,n.source,{...n.provenance,via:'swap'});
-        run('update track set name=?,role=?,preset_id=?,preset_version=? where id=?',n.name,n.role,n.presetId,n.presetVersion,tr.id);
+        run('update track set name=?,role=?,preset_id=?,preset_version=?,look_json=?,character_id=? where id=?',n.name,n.role,n.presetId,n.presetVersion,n.look?JSON.stringify(n.look):null,n.characterId,tr.id);
       }else{
         const c=one('select * from clip where track_id=? and slot=?',tr.id,s);const old=c&&one('select * from clip_revision where clip_id=? and revision=?',c.id,payload.revision);need(old,'That revision is unavailable.',404);
         const doc=validateAny(JSON.parse(old!.document_json));writeRevision(tr,s,doc,old!.source_text,{restoredFrom:payload.revision});
@@ -309,6 +320,18 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
     }
     case 'part.rename':{const tr=part(payload.trackId);version(tr);run('update track set name=? where id=?',text(payload.name,40,'the part a name'),tr.id);touchTrack(tr);view=true;audience=true;break;}
     case 'part.remove':{const tr=part(payload.trackId);version(tr);free(tr);run('update track set archived_at=? where id=?',now,tr.id);leases.delete(tr.id);touchTrack(tr);plan();break;}
+    case 'part.look':{
+      const tr=part(payload.trackId,true);if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest parts belong to their performer.',403);
+      version(tr);const look=validLook(payload.look);need(look,'That look is not one Ensemble can draw.');
+      run('update track set look_json=? where id=?',JSON.stringify(look),tr.id);touchTrack(tr);view=true;audience=true;break;
+    }
+    // Delete a removed track for good. Only a track already off the stage can go,
+    // and only its owner or the person who added it may do it.
+    case 'part.purge':{
+      const tr=part(payload.trackId);need(tr.archived_at,'Remove this track from the stage first.',409);
+      need(owner||tr.owner_id===v.id,'Only the mix’s owner or the person who added this track can delete it.',403);
+      purgeTrack(tr.id);entityId=tr.id;break;
+    }
     case 'part.return':{const tr=part(payload.trackId);need(tr.archived_at,'That part is already in the mix.',409);capacity();run('update track set archived_at=null where id=?',tr.id);touchTrack(tr);plan();break;}
     case 'part.duplicate':case 'part.keep':{
       const tr=part(payload.trackId,type==='part.keep');capacity();claimEditing(id,v);
@@ -316,7 +339,7 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
       const c=one("select r.*,c.slot from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where c.track_id=? and c.slot=?",tr.id,payload.slot??'A');need(c,'That part has no saved sound to copy.',404);
       const doc=validateAny(JSON.parse(c!.document_json)),source=sourceOf(doc,c!.source_text);
       const provenance=type==='part.keep'?{keptBy:v.handle,fromPerformance:tr.guest_performance_id}:{duplicatedFrom:{part:tr.name,by:handleOf(tr.owner_id)}};
-      newPart(type==='part.keep'?tr.name:`${tr.name} copy`.slice(0,40),tr.role,tr.preset_id,tr.preset_version,source,provenance,type==='part.keep'?tr.owner_id:v.id);
+      newPart(type==='part.keep'?tr.name:`${tr.name} copy`.slice(0,40),tr.role,tr.preset_id,tr.preset_version,source,provenance,type==='part.keep'?tr.owner_id:v.id,null,lookOf(tr),tr.character_id??null);
       plan();break;
     }
     case 'part.slot':{
@@ -344,6 +367,21 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
     }
     case 'project.rotateLink':{need(owner,'Only the owner can change the view link.',403);run('update project set view_link_version=view_link_version+1 where id=?',id);run("delete from capability_grant where kind='view' and resource_id=?",id);entityId=id;after(revalidate);break;}
     case 'project.acknowledge':{need(owner,'Only the owner sees this note.',403);run('update project set migrated_public=0 where id=?',id);entityId=id;break;}
+    // Deleting a mix ends what depends on it in the same transaction: its sound,
+    // any live performance, pending invitations and shared links. The rows stay
+    // so the owner can restore it; every read now answers as if it were missing.
+    case 'project.delete':{
+      need(owner,'Only the owner can delete this mix. You can leave it instead.',403);
+      need(payload.confirmTitle===a.project.title,'Type the mix’s exact name to delete it.',422);
+      if(t.status==='playing')stopTransport(id,t,settings.bpm,now);
+      const perf=livePerformance(id);if(perf)endLive(after,perf,'mix-deleted',v);
+      setHost(id,null,now);
+      run("update invitation set revoked_at=? where revoked_at is null and ((kind='project' and resource_id=?) or (kind='perform' and resource_id in (select id from performance where project_id=?)))",now,id,id);
+      run("delete from capability_grant where kind='view' and resource_id=?",id);
+      run('update project set deleted_at=?,view_link_version=view_link_version+1 where id=?',now,id);
+      for(const [k,l] of leases)if(l.projectId===id)leases.delete(k);
+      entityId=id;closeStreams=true;break;
+    }
     case 'member.remove':case 'member.leave':{
       const target=type==='member.leave'?v.id:payload.visitorId;
       if(type==='member.remove')need(owner,'Only the owner manages membership.',403);
@@ -360,7 +398,8 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
     case 'transport.start':{
       need(t.status==='stopped','The mix is already playing.',409);
       if(!isHost){need(!hostId,`${hostId?handleOf(hostId):''} is hosting. Only the host starts the shared mix.`,403);setHost(id,v.id,now);}
-      startTransport(id,one('select * from transport where project_id=?',id)!,now);entityRevision=t.revision+1;audience=true;break;
+      // Starting with the sequence runs it from bar one, on the same clock.
+      startTransport(id,one('select * from transport where project_id=?',id)!,now,payload.arrangement===true?arrangement(JSON.parse(settings.arrangement_json)):null);entityRevision=t.revision+1;audience=true;break;
     }
     case 'transport.stop':{need(t.status==='playing','The mix is already stopped.',409);need(isHost||owner,'Only the host stops the shared mix.',403);stopTransport(id,t,settings.bpm,now);entityRevision=t.revision+1;audience=true;break;}
     case 'tempo.set':{host();need(t.status==='stopped','Stop the mix before changing tempo.',409);need(Number.isInteger(payload.bpm)&&payload.bpm>=60&&payload.bpm<=180,'Tempo is 60–180 BPM.');run('update project_settings set bpm=?,settings_revision=settings_revision+1 where project_id=?',payload.bpm,id);plan();break;}
@@ -380,9 +419,44 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
   if(changed){
     run('update project set revision=revision+1,updated_at=? where id=?',now,id);
     const eventId=announce(after,v,id,kind,entityId,cid,{view,audience});
+    // After the broadcast, so people in the room hear why their stream ended.
+    if(closeStreams)after(revalidate);
     return {ok:true,commandId:cid,projectRevision:Number(a.project.revision)+1,entityId,entityRevision,eventId,...(effectiveCycle!==undefined?{effectiveCycle}:{})};
   }
   return {ok:true,commandId:cid,projectRevision:Number(a.project.revision),entityId,entityRevision,eventId:0};
+}
+function purgeTrack(trackId:string){
+  run('delete from clip_revision where clip_id in (select id from clip where track_id=?)',trackId);
+  run('delete from clip where track_id=?',trackId);
+  run('delete from scene_assignment where track_id=?',trackId);
+  run('delete from track where id=?',trackId);
+}
+// Undoes a delete. It comes back private, with nobody hosting; invitations and
+// links revoked by the delete stay revoked.
+export function restoreProject(v:Visitor,id:string){
+  return tx(after=>{
+    const p=one("select p.* from project p join project_member m on m.project_id=p.id where p.id=? and m.visitor_id=? and m.role='owner' and m.removed_at is null and p.deleted_at is not null",id,v.id);if(!p)throw hidden();
+    run("update project set deleted_at=null,visibility='private',revision=revision+1 where id=?",id);
+    announce(after,v,id,'project.restored',id,null);return {ok:true,id};
+  });
+}
+// Removes a deleted mix for good. Copies of its characters are separate rows and
+// are not touched.
+export function purgeProject(v:Visitor,id:string,input:Row){
+  return tx(after=>{
+    const p=one("select p.* from project p join project_member m on m.project_id=p.id where p.id=? and m.visitor_id=? and m.role='owner' and m.removed_at is null and p.deleted_at is not null",id,v.id);if(!p)throw hidden();
+    need(input.confirmTitle===p.title,'Type the mix’s exact name to delete it for good.',422);
+    const performances=rows('select id from performance where project_id=?',id).map(x=>x.id as string);
+    for(const pid of performances){for(const table of ['performance_chat','performance_request','performance_participant'])run(`delete from ${table} where performance_id=?`,pid);run("delete from capability_grant where kind='listen' and resource_id=?",pid);run("delete from invitation_receipt where invitation_id in (select id from invitation where kind='perform' and resource_id=?)",pid);run("delete from invitation where kind='perform' and resource_id=?",pid);run('delete from event where scope=?',`audience:${pid}`);}
+    run('delete from performance where project_id=?',id);
+    for(const t of rows('select id from track where project_id=?',id))purgeTrack(t.id);
+    for(const table of ['performance_plan','transport','project_settings','project_chat','project_member'])run(`delete from ${table} where project_id=?`,id);
+    run("delete from invitation_receipt where invitation_id in (select id from invitation where kind='project' and resource_id=?)",id);run("delete from invitation where kind='project' and resource_id=?",id);
+    run("delete from capability_grant where kind='view' and resource_id=?",id);
+    run('delete from event where project_id=? or scope=? or scope=?',id,`member:${id}`,`view:${id}`);
+    run('delete from project where id=?',id);
+    after(()=>logAction(v,'project.purged',{project:id.slice(0,8)}));return {ok:true};
+  });
 }
 function arrangement(raw:any):Arrangement{
   need(raw&&Array.isArray(raw.entries)&&raw.entries.length>0&&raw.entries.length<=8&&typeof raw.loop==='boolean','An arrangement has 1–8 entries and a Loop choice.');
@@ -456,23 +530,11 @@ export function deleteProjectChat(v:Visitor,id:string,messageId:unknown){
   });
 }
 
-// --- saved sounds ("My sounds") ------------------------------------------------
-export function mySounds(v:Visitor){return rows('select id,name,role,source,attribution_json,created_at as createdAt from user_sound where visitor_id=? order by created_at desc limit 100',v.id).map(s=>({id:s.id,name:s.name,role:roleOf(s.role),source:s.source,attribution:JSON.parse(s.attribution_json),createdAt:s.createdAt}));}
-export function saveSound(v:Visitor,input:Row){
-  const name=text(input.name,40,'the sound a name'),source=code(input.source);parseSource(source);
-  limit(`sound:${v.id}`,10,0.2);persist(v);
-  need(Number(one('select count(*) as n from user_sound where visitor_id=?',v.id)!.n)<100,'You can keep 100 sounds. Delete one first.',409);
-  const from=typeof input.from==='object'&&input.from?{part:typeof input.from.part==='string'?input.from.part.slice(0,40):undefined,preset:typeof input.from.preset==='string'?input.from.preset.slice(0,40):undefined,addedBy:typeof input.from.addedBy==='string'?input.from.addedBy.slice(0,40):undefined}:{};
-  const sid=randomUUID();run('insert into user_sound values(?,?,?,?,?,?,?)',sid,v.id,name,(ROLES as readonly string[]).includes(input.role)?input.role:null,source,JSON.stringify({savedBy:handleOf(v.id),...from}),Date.now());
-  return {id:sid};
-}
-export function deleteSound(v:Visitor,soundId:unknown){need(run('delete from user_sound where id=? and visitor_id=?',soundId,v.id).changes,'That sound is not yours.',404);return {ok:true};}
-
 // --- export and import (members only) ---------------------------------------------
 export function exportProject(v:Visitor,id:string){
   const s=roomSnapshot(v,id);
   return {format:'ensemble',schemaVersion:2,title:s.title,settings:{bpm:s.settings.bpm,sceneNames:s.settings.sceneNames,arrangement:s.settings.arrangement},
-    parts:s.parts.filter(p=>!p.archivedAt&&!p.guest).map(p=>({id:p.id,name:p.name,role:p.role==='custom'?null:p.role,presetId:p.presetId,presetVersion:p.presetVersion,clips:Object.fromEntries(Object.entries(p.clips).map(([k,c])=>[k,{document:c!.document,source:c!.source,provenance:c!.provenance}]))})),
+    parts:s.parts.filter(p=>!p.archivedAt&&!p.guest).map(p=>({id:p.id,name:p.name,role:p.role==='custom'?null:p.role,look:p.look,presetId:p.presetId,presetVersion:p.presetVersion,clips:Object.fromEntries(Object.entries(p.clips).map(([k,c])=>[k,{document:c!.document,source:c!.source,provenance:c!.provenance}]))})),
     plan:(()=>{const p=s.plans.at(-1)!;return {mix:p.mix,manual:p.manual,sceneAssignments:p.sceneAssignments,scene:p.scene};})()};
 }
 export function importProject(v:Visitor,input:Row){
@@ -488,7 +550,8 @@ export function importProject(v:Visitor,input:Row){
       need(raw&&typeof raw==='object'&&raw.clips&&typeof raw.clips==='object'&&Object.keys(raw.clips).length<=4,'Each part has at most four clip slots.');
       const trackId=randomUUID();mapping[String(raw.id??i)]=trackId;
       // Parts beyond the twelve-part limit arrive removed, not dropped.
-      run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version) values(?,?,?,?,?,1,?,?,?,?)',trackId,id,v.id,text(raw.name,40,'each part a name'),i,i>=ROOM_LIMITS.parts?now:null,(ROLES as readonly string[]).includes(raw.role)?raw.role:null,typeof raw.presetId==='string'?raw.presetId:null,Number.isInteger(raw.presetVersion)?raw.presetVersion:null);
+      const importedLook=validLook(raw.look);
+      run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,look_json) values(?,?,?,?,?,1,?,?,?,?,?)',trackId,id,v.id,text(raw.name,40,'each part a name'),i,i>=ROOM_LIMITS.parts?now:null,(ROLES as readonly string[]).includes(raw.role)?raw.role:null,typeof raw.presetId==='string'?raw.presetId:null,Number.isInteger(raw.presetVersion)?raw.presetVersion:null,importedLook?JSON.stringify(importedLook):null);
       for(const [s,c] of Object.entries(raw.clips) as [string,Row][]){
         slot(s);let doc:AnyDocument,source:string|null=c.source??null;
         if(c.document?.schemaVersion===2){need(typeof source==='string','Expression parts carry their source.');doc=parseSource(source!).document;}
@@ -521,7 +584,7 @@ function migrateLegacy(){
   if(!old.length)return;
   db.exec('begin immediate');try{
     const first=old[0],v:Visitor={id:first.visitor_id,handle:first.handle,fresh:false};
-    let id=one("select id from project where title='Earlier sketches' limit 1")?.id;if(!id)id=newProject(v,'Earlier sketches','private',false);
+    let id=one("select id from project where title='Earlier sketches' and deleted_at is null limit 1")?.id;if(!id)id=newProject(v,'Earlier sketches','private',false);
     for(const row of old){
       try{const doc=parseCode(row.body),count=Number(one('select count(*) as n from track where project_id=? and archived_at is null',id)!.n);
         const trackId=randomUUID(),position=Number(one('select coalesce(max(position),-1)+1 as p from track where project_id=?',id)!.p);

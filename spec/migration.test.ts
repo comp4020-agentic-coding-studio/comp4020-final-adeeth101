@@ -86,7 +86,7 @@ it('restores from the backup: the backup boots as the Stream data and migrates a
   try{
     await restored.boot();
     const db=new DatabaseSync(restored.DB_PATH,{readOnly:true});
-    expect(db.prepare('select max(version) as v from studio_migration').get()).toEqual({v:2});
+    expect(db.prepare('select max(version) as v from studio_migration').get()).toEqual({v:3});
     expect(count(db,'select count(*) as n from clip_revision')).toBe(9);expect(count(db,'select count(*) as n from project_member')).toBe(4);
     db.close();
   }finally{await restored.cleanup();}

@@ -14,7 +14,7 @@ export const tokenHash=(token:string)=>createHash('sha256').update(token).digest
 export const newToken=()=>randomBytes(24).toString('base64url');
 
 export function memberRole(projectId:string,visitorId:string):ProjectRole|null{
-  return (one('select role from project_member where project_id=? and visitor_id=? and removed_at is null',projectId,visitorId)?.role as ProjectRole)??null;
+  return (one('select m.role from project_member m join project p on p.id=m.project_id where m.project_id=? and m.visitor_id=? and m.removed_at is null and p.deleted_at is null',projectId,visitorId)?.role as ProjectRole)??null;
 }
 export function hasGrant(visitorId:string,kind:string,resourceId:string,linkVersion:number){
   return !!one('select 1 from capability_grant where visitor_id=? and kind=? and resource_id=? and link_version=?',visitorId,kind,resourceId,linkVersion);
@@ -22,7 +22,7 @@ export function hasGrant(visitorId:string,kind:string,resourceId:string,linkVers
 // Members read everything; others read only the published mix of a public
 // project, or of an unlisted one whose view link they have redeemed.
 export function projectAccess(v:Visitor,projectId:string):ProjectAccess|null{
-  const project=one('select * from project where id=?',projectId);
+  const project=one('select * from project where id=? and deleted_at is null',projectId);
   if(!project)return null;
   const role=memberRole(projectId,v.id);
   if(role)return {project,role,read:'member'};
@@ -37,7 +37,7 @@ export function memberOf(v:Visitor,projectId:string){const a=projectAccess(v,pro
 // listen link (redeemed into a grant for this session's identity) or a role.
 export type PerformanceAccess={performance:Record<string,any>;role:'host'|'member'|'performer'|'listener'};
 export function performanceAccess(v:Visitor,performanceId:string):PerformanceAccess|null{
-  const p=one('select * from performance where id=?',performanceId);
+  const p=one('select f.* from performance f join project j on j.id=f.project_id where f.id=? and j.deleted_at is null',performanceId);
   if(!p)return null;
   const part=one('select * from performance_participant where performance_id=? and visitor_id=?',performanceId,v.id);
   if(part?.removed)return null;

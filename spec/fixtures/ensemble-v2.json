@@ -1,0 +1,22 @@
+{
+ "mix": "123b45de-8bee-4028-8ae7-39a541fed558",
+ "pub": "2a321390-81d5-4656-bbe0-abc3727fae3a",
+ "sound": "0fede748-00e0-4b92-b105-a955a31ba44e",
+ "perf": "28d0f8fb-a0e0-431a-9b93-122c129aee13",
+ "kick": "767abd34-356c-4a03-b284-3c1e967bda72",
+ "bass": "39e2f961-c3eb-4a20-9106-a3263a7cfa6e",
+ "custom": "9d085497-fdff-4513-a55b-09921e2e050b",
+ "ada": "8bf17974-e187-4591-8eb8-ddb40869fa94",
+ "ben": "ceaa782c-bda0-430c-a223-601c3f50e583",
+ "cam": "1183fc58-522a-46b4-846e-a871ffd46090",
+ "sources": {
+  "767abd34-356c-4a03-b284-3c1e967bda72": "stack(s(\"bd ~ bd ~\"), s(\"~ sd ~ sd\").gain(0.45), s(\"hh*8\").gain(0.16))",
+  "39e2f961-c3eb-4a20-9106-a3263a7cfa6e": "note(\"33 ~ 33 40\").s(\"sawtooth\").lpf(700)",
+  "9d085497-fdff-4513-a55b-09921e2e050b": "// hand written\nnote(\"<a2 c3> ~ e3 ~\").s(\"triangle\").room(0.2)"
+ },
+ "mixGain": {
+  "gain": 0.31,
+  "mute": true
+ },
+ "pendingInvite": "649979b5-397a-474f-b46f-69cab94f7fcf"
+}

@@ -26,7 +26,9 @@ export function broadcast(scope:Scope,eventId:number,kind:string,payload:Record<
   for(const l of [...listeners]){
     if(l.scope!==scope)continue;
     if(l.res.writableLength>STREAM_LIMITS.bufferBytes){drop(l);continue;}
-    send(l,`id: ${eventId}\nevent: change\ndata: ${data}\n\n`);
+    // Ephemeral broadcasts carry no id: id 0 would reset the browser's
+    // Last-Event-ID, and a reconnect would then replay nothing it missed.
+    send(l,`${eventId?`id: ${eventId}\n`:''}event: change\ndata: ${data}\n\n`);
   }
 }
 // Personal view changes invalidate only this visitor's open pages. No resource
