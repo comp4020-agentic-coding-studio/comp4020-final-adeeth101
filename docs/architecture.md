@@ -58,6 +58,57 @@ Volume is therefore not a code edit: it is the part's level in the shared mix
 (`part.mix`), which multiplies whatever the code says. That keeps a preset's
 internal balance (a kick at full, hats at 0.16) when someone turns it down.
 
+## The grid is a lens, not a second pattern
+
+The backlog rated a step grid low because a grid that models patterns has to
+disable itself on most real parts, and two models drift. So the grid models
+nothing. `shared/steps.ts` reads the source and writes edits back into its text,
+replacing only the pieces that changed. There is nothing to keep in sync, because
+there is only one thing.
+
+That choice decided the rest. Representing a step and rewriting it are separate
+questions, so what cannot be represented is locked in place and everything around
+it stays editable, rather than the whole part being disabled. Reading is free of
+side effects, so switching tabs cannot rewrite anything. Viewing finer than the
+text needs costs nothing until a step is placed. Each write is read back and must
+match, which turns a bug in the lens into a refused edit, not corrupted music, and
+every character is checked against Strudel's own output after a forced rewrite of
+every step.
+
+The cost is that an edit can leave a pattern less compact than a person would write
+it: `33*4 40*4` becomes `33*4 [40 ~ 40 40]`. That is only the piece they touched,
+and it sounds exactly as drawn.
+
+## Characters are copied, listings are snapshots
+
+A shared character could have been referenced by mixes that use it. Then editing or
+deleting it would change other people's music, which is the one thing a mix must
+never suffer. So use always copies: a track holds its own look and source, a saved
+copy is a new row, and a credit is a stored string that outlives its subject.
+
+A listing is a snapshot for the same reason in the other direction: a person
+experimenting with their own character should not be publishing every step of it.
+The character table has no column that could hold a project, a chat or an unused
+clip, so a leak would take a schema change, not just a mistake in a query. Saved
+sounds carried a part name in their attribution, and that is deliberately not
+carried forward.
+
+Looks are ids rather than SVG. Accepting drawn markup from people would make every
+shared character a stored-script risk, and validating SVG is much harder than
+checking a value against a list.
+
+## Deleting
+
+A mix is deleted in two steps. The first is a soft delete, because mixes are shared
+and an owner's mistake lands on everyone: the rows stay, and one check in
+`src/access.ts` makes every read answer like a missing mix, so no route needs its
+own rule. Everything that depends on the mix ends in the same transaction. Restoring
+brings it back private, with its invitations still revoked, because links that were
+out in the world when it was deleted should not silently start working again.
+
+The second step removes the rows, for people who really mean it. Members never see
+either: leaving is what they can do, and the mix stays with the group.
+
 ## Visibility, roles and scoped events
 
 Every read starts in `src/access.ts`. A project is read either as a member
@@ -176,6 +227,23 @@ anything queued later is cancelled. Live performances end as `interrupted`
 and their guest parts leave. Edit leases, presence and online status are in
 memory and simply vanish. Nothing auto-resumes.
 
+## Reactions as totals
+
+Each reaction used to be its own broadcast, to the audience only. Sending them to
+the stage as well would multiply that by every open performer page, so they are
+now counted and sent as a small total a few times a second. A burst costs a handful
+of events whatever the audience's size, the stage can show `👏 ×12` instead of
+twelve animations, and there is nothing to store.
+
+## An engine of its own for rendering
+
+Offline rendering used to borrow the live engine by swapping its context, restoring
+it afterwards. Comparing the old build with the new one showed this had always been
+wrong: the live loop kept ticking during a render and scheduled into the offline
+context, so a soft triangle bass reported the kick's peak. A render now constructs
+its own `StudioAudio`. This is what lets an export run while the mix plays, and it
+also corrected the earlier level measurements.
+
 ## Sound and headroom
 
 The output implements exactly the grammar's controls. A fixed master gain
@@ -192,6 +260,20 @@ Browsers allow six HTTP/1.1 connections per site and each live stream holds
 one. Room and audience pages therefore poll notifications rather than opening
 a second stream; one open mix costs one connection. Fly's proxy speaks
 HTTP/2, which multiplexes streams, so this matters most locally.
+
+## Sections on the scenes that were already there
+
+The server already had scenes, arrangements, published plans and restart handling,
+tested and with no interface. Building sections on them meant shared phase, late
+joiners, audience reach and host transfer were already solved. The cost is the
+model's limits: four sections and eight sequence entries. For one mix that has
+proved enough to say something, and raising them would be a change to those limits
+rather than a new system.
+
+AI transitions were left out. A transition would need a model call, a key and a
+result that differs between runs, in a product whose shared playback depends on
+everyone following one durable plan. What people actually lack at that moment is a
+starting shape, and a few rules about roles give one.
 
 ## Build and deployment
 

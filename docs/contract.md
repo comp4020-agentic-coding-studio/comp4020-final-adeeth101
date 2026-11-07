@@ -6,6 +6,18 @@ The product direction behind it is [the Ensemble contract](ensemble-contract.md)
 trade-offs are in [architecture](architecture.md); what has been checked, and
 how, is in [verification](verification.md).
 
+## Words
+
+The interface uses four words, and the code keeps its older names for the same
+things, because renaming tables and APIs would change nothing a person sees:
+
+| On screen | In the code | Means |
+| --- | --- | --- |
+| Mix | project | The whole saved collaboration |
+| Character | preset, saved character | A performer and its reusable sound, in the cast or a library |
+| Track | part, `track` table | A character's own copy in one mix |
+| Section | scene | A named group of tracks in a sequence |
+
 ## Modules
 
 ### Guest editing and personal chat views (28 October)
@@ -33,7 +45,11 @@ Filtering never deletes shared history or removes project membership.
 | `shared/music.ts`, `shared/code.ts` | Version 1: Stream's bounded tree and its small code grammar, kept for old parts |
 | `shared/clip.ts` | Validates either version and gives a part's exact source |
 | `shared/compile.ts` | Strudel `Pattern` construction from either version, through named calls |
-| `shared/presets.ts` | The factory catalogue: 3 packs × 8 presets, catalogue version 1 |
+| `shared/presets.ts` | The factory cast: 9 packs × 8 characters, catalogue version 2 |
+| `shared/look.ts` | A character's appearance as allowlisted ids, validation, random and derived looks |
+| `shared/steps.ts` | The step editor's lens: reads a source into a grid, writes edits back into its text |
+| `shared/sections.ts` | The deterministic Suggest a build-up |
+| `shared/export.ts` | What an audio export renders, its limits, and the WAV encoder |
 | `shared/performance.ts` | Plans, the scene/arrangement resolver and restart selection |
 | `shared/studio.ts` | Snapshot types: room, public view, audience |
 | `src/server.ts` | The routing table, request limits and error statuses |
@@ -41,16 +57,21 @@ Filtering never deletes shared history or removes project membership.
 | `src/access.ts` | Who may read a project or a performance, and in which role |
 | `src/hub.ts` | Scoped events and live streams |
 | `src/studio.ts` | Rooms: parts, commands, leases, host, plans, chat, saved sounds, import/export, restart |
+| `src/characters.ts` | Saved characters: library, sharing, copies, and the older saved-sound routes |
 | `src/social.ts` | Friends, blocks, notifications, invitations, recovery codes |
 | `src/performances.ts` | Live performances, audience snapshot, guest parts, audience chat, moderation |
 | `src/studio-page.ts` | The server-rendered shell for every page |
 | `src/db.ts`, `src/identity.ts` | SQLite connection, the signed visitor cookie, derived link tokens |
 | `src/events.ts`, `src/feature.ts`, `src/page.ts`, `public/app.js` | The earlier sketchpad, served at `/legacy`, and the action log |
 | `client/main.ts` | Routes the shell to a view |
-| `client/room.ts` | The project room: stage, tray, part drawer (Shape, Code), chat, invite, go live |
+| `client/room.ts` | The project room: stage, cast tray, track drawer (Track, Pattern, Shape, Code), chat, invite, go live |
+| `client/pattern-editor.ts` | The step editor: drum lanes and a note grid, used by the drawer and the creator |
+| `client/creator.ts`, `client/library.ts` | The character creator; the Characters page and shared-link page |
+| `client/arrange.ts`, `client/reactions.ts`, `client/export.ts` | The sections strip; reactions on the stage; Export audio |
 | `client/audience.ts`, `client/pages.ts` | Audience view; Play, Live now, Friends, public mixes, invitation pages |
 | `client/audio.ts`, `client/sound.ts` | Shared-clock scheduler, preview channel and bounded WebAudio output |
-| `client/live.ts`, `client/drafts.ts`, `client/performer.ts` | Streams and clock calibration; IndexedDB drafts; original performer drawings |
+| `client/live.ts`, `client/drafts.ts`, `client/performer.ts` | Streams and clock calibration; IndexedDB drafts; drawing a look as SVG, and character motion |
+| `docs/design/` | The three rendered design directions, their screenshots and the measurements that informed the choice |
 | `spec/*.test.ts`, `spec/browser/*.pw.ts` | Promises checked over HTTP, and in a real browser |
 
 ## The musical model
@@ -70,13 +91,16 @@ and leaves the earlier revisions and other clip slots as they were.
 The version 2 grammar, parsed with Acorn and never executed:
 
 ```text
-pattern := s("mini") | note("mini").s("sine"|"triangle"|"square"|"sawtooth")
+pattern := s("mini") | note("mini").s(voice)
          | stack(pattern, … up to 8)
-         | pattern.gain(0–1) | .lpf(60–16000) | .room(0–1) | .pan(0–1) | .release(0.01–4)
+         | pattern.gain(0–1) | .lpf(60–16000) | .hpf(20–8000) | .room(0–1) | .delay(0–1) | .pan(0–1)
+         | pattern.attack(0.001–4) | .decay(0.01–4) | .sustain(0–1) | .release(0.01–4)
+         | pattern.fm(0–16) | .fmh(0.25–8)
          | pattern.fast(f) | pattern.slow(f) | pattern.rev()     f ∈ {0.25, 0.5, 1…8}
+voice   := sine | triangle | square | sawtooth | supersaw | pulse
 mini    := steps separated by spaces; ~ rest; [a b] subdivide; <a b> one per bar;
            a,b layers or chords; a*n, a/n (n 1–16); a!n or a! repeat; a@n weight
-words   := bd sd hh cp (in s) | MIDI 24–96 or note names like a3, c#4, eb2 (in note)
+words   := bd sd hh oh cp rim lt ht cb sh (in s) | MIDI 24–96 or note names like a3, c#4, eb2 (in note)
 ```
 
 Comments, a trailing semicolon and template strings without `${}` are
@@ -102,6 +126,69 @@ number or a whole-number fraction: a bar never straddles child cycles.
 
 Version 1 limits are unchanged (`shared/music.ts`): 1–32 steps, MIDI 48–83,
 128 steps per bar.
+
+## The step grid
+
+`shared/steps.ts` is a view of the source, not a second pattern. It reads every
+`s(…)` and `note(…).s(…)` into a lane; an edit replaces only the pieces of the
+literal that changed, and everything else stays byte for byte. Every write is
+parsed and read back, and must show exactly what was asked for, or nothing
+changes.
+
+| In the source | On the grid |
+| --- | --- |
+| steps, `~`, `[a b]`, `a*n`, `a!n`, `a@n` | Exact steps; `@` is a held note |
+| `[a,b]` | A chord in one step |
+| `<a b c>` as the whole pattern | One step per bar |
+| `<a b>` beside other steps, `a/n`, layers inside a step | A locked step: shown, explained, kept verbatim, editable in Code |
+| commas at the top level, more than 32 steps | The layer is not shown; the reason is stated |
+
+A person can view a pattern finer than its text needs; that changes nothing
+until a step is placed. Length in bars repeats what is there, then writes
+`.slow(n)`. **Make an editable copy** rewrites alternation as plain bars in a
+separate new track; the original is never touched. All 72 characters appear on
+the grid, and 70 have no locked step.
+
+Pattern and Code edit one draft, so what the grid shows and what Code shows are
+the same text. Apply, revisions, leases, preview and conflict recovery are the
+same for both.
+
+## Characters
+
+```ts
+type Look = {v:1; body; eyes; mouth; top; wear; prop; skin; cloth; trim};  // allowlisted ids only
+type CharacterDocument = {format:'ensemble-character'; version:1; name; role; look;
+                          source; level; credit:{creator; remixOf:null|{id;name;by}}};
+```
+
+A look holds ids and nothing else: no markup, path, URL or free colour. Unknown
+fields are dropped and unknown ids are refused. Sixteen bodies each have their
+own silhouette and anchors.
+
+A saved character is private until its owner lists it. **Listing is a snapshot**:
+`published_json` is what others read, and later edits stay private until the
+owner updates the listing. Public or unlisted sharing needs an explicit
+confirmation that the code is shared. No project, chat, clip, member or part
+name is stored on a character, so none can travel with one.
+
+**Using a character copies it.** Adding one to a mix writes the source, look and
+level into the track; saving a copy writes a new private row with a credit.
+Editing, unlisting or deleting the original changes neither. Parts saved before
+looks existed keep none stored and are drawn from their preset or id.
+
+## Removing things
+
+| Action | Who | What happens |
+| --- | --- | --- |
+| Remove from stage (`part.remove`) | Member | The track leaves the mix and can be brought back |
+| Delete a removed track (`part.purge`) | Owner, or whoever added it | Its clips and history go for good |
+| Delete a saved character | Its owner | It and its listing go; mixes and copies keep theirs |
+| Stop sharing (`…/unpublish`) | Its owner | The listing and its link stop; the character stays |
+| Stop listing a mix | Owner | The mix becomes private and leaves Public mixes |
+| Delete a mix (`project.delete`, exact name required) | Owner | Sound stops, a live performance ends, invitations and links are revoked, streams close after telling the room why, and every read answers like a missing mix |
+| Restore (`…/restore`) | Owner | It returns private; revoked invitations and links stay revoked |
+| Delete forever (`…/purge`, exact name required) | Owner, after deleting | Its rows are removed; saved characters are not |
+| Leave (`member.leave`) | A member | It leaves their list and stays with the group |
 
 ## Storage
 
@@ -135,6 +222,21 @@ user_sound         visitor, name, role, source, attribution_json
 
 Every Stream piece became `public` with `migrated_public = 1`; creators became
 owners and track owners members. Nothing else was assigned to anyone.
+
+Migration 3 adds:
+
+```
+project            + deleted_at
+track              + look_json, character_id
+character          owner, name, role, look_json, source, level, revision,
+                   creator_id, creator_handle, remix_of_id|name|by,
+                   visibility private|unlisted|public, link_version,
+                   published_json|name|role|revision|at, deleted_at
+```
+
+Each saved sound becomes a private character with the same id, so a part or
+request that names one still works; `user_sound` itself stays as it was. Nothing
+in `clip_revision` or any credit is touched.
 Ephemeral state lives in memory and is lost on restart by design: edit leases,
 room presence, friends' online status and reactions.
 
@@ -144,7 +246,8 @@ Pages:
 
 | Route | Does |
 | --- | --- |
-| `GET /` | Play: Start a mix (also a plain form post), Your mixes |
+| `GET /` | Play: Start a mix (also a plain form post), Your mixes, Recently deleted |
+| `GET /characters`, `/c/:id` | The Characters page; a character's page and shared link |
 | `GET /p/:id` | Project room for members, saved-mix view for permitted visitors, generic 404 otherwise |
 | `GET /p/:id/compose`, `/p/:id/perform` | 301 to `/p/:id` |
 | `GET /live`, `/live/:id` | Live now; audience view |
@@ -176,7 +279,15 @@ no-store`):
 | `POST /api/performances/:id/commands` | guest performer | `guest.add`, `guest.edit`, `guest.remove` |
 | `GET /api/live`, `/api/discover` | anyone | Public live performances; public mixes (paginated) |
 | `GET /api/presets` | anyone | The factory catalogue |
-| `GET`/`POST /api/sounds`, `…/:id/delete` | visitor | My sounds |
+| `GET`/`POST /api/sounds`, `…/:id/delete` | visitor | Saved sounds: the older routes, now reading the character table |
+| `GET`/`POST /api/characters` | visitor | Their characters; a new one (201) |
+| `GET /api/characters/:id` | owner, or anyone the listing admits | The working copy for its owner, the listed snapshot for others |
+| `POST /api/characters/:id` | owner | Save, with `expectedRevision`; stale is 409 with the current character |
+| `POST /api/characters/:id/copy` | anyone who can read it | An independent private copy with a credit (201) |
+| `POST …/publish`, `…/unpublish`, `…/rotate-link`, `…/delete` | owner | `publish` needs `{visibility, confirmSource:true}` |
+| `POST …/share-link` | anyone | Redeem an unlisted token into a grant |
+| `GET /api/library?q=&role=&page=` | anyone | Publicly listed characters, without people the visitor has blocked |
+| `POST /api/projects/:id/restore`, `…/purge` | owner | Undo a delete; remove a deleted mix for good |
 | `GET`/`POST /api/friends` | visitor | Friends view; request, accept, decline, cancel, remove, block, unblock |
 | `GET /api/notifications`, `…/:id/clear`, `GET /api/account/events` | visitor | Notifications and their content-free stream |
 | `POST /api/invitations`, `…/:id/preview|accept|decline|revoke` | owner or host / invitee | Invitation lifecycle |
@@ -189,18 +300,21 @@ A room command is `{commandId: UUID, type, expectedRevision?, payload}`:
 
 | Command | Who | Checked |
 | --- | --- | --- |
-| `part.add` (`presetId` / `soundId` / `source`, `play?`) | member, editor slot | 12 parts; `play` starts the mix if the caller hosts or nobody does |
+| `part.add` (`presetId` / `characterId` / `soundId` / `source`, `play?`) | member, editor slot | 12 parts; `play` starts the mix if the caller hosts or nobody does; a character must be readable by the caller |
 | `part.edit`, `part.swap`, `part.restore` | member, not leased by another | clip revision |
 | `part.mix` (gain, mute), `part.rename`, `part.slot`, `scene.assign` | member | part revision when given |
 | `part.remove`, `part.return`, `part.duplicate`, `part.keep` | member | lease; capacity |
+| `part.look` | member; a guest for their own | part revision when given; the look is validated |
+| `part.purge` | owner, or whoever added the track | it must already be removed |
 | `part.lease`, `part.release` | member (owner may force release) | — |
 | `project.rename` | member | — |
 | `project.visibility`, `project.rotateLink`, `project.acknowledge`, `member.remove` | owner | — |
+| `project.delete` | owner | `confirmTitle` must be the exact name |
 | `member.leave` | member (not the owner) | — |
 | `host.claim` / `host.pass` / `host.release` | member when free / host | — |
-| `transport.start` | host, or anyone when nobody hosts (they become host) | stopped |
+| `transport.start` (`arrangement?`) | host, or anyone when nobody hosts (they become host) | stopped; `arrangement:true` runs the saved sequence from bar one |
 | `transport.stop` | host or owner | playing |
-| `tempo.set`, `scene.rename`, `scene.launch`, `arrangement.*` | host | stopped for tempo |
+| `tempo.set`, `scene.rename`, `scene.launch`, `arrangement.*`, `sections.apply` | host | stopped for tempo |
 
 Success is `{ok, commandId, projectRevision, entityId, entityRevision,
 eventId, effectiveCycle?}`. Statuses: 400 malformed JSON, 403 not allowed in
@@ -250,6 +364,44 @@ listeners per performance; a refused page polls every second and says so. A
 stream with more than 128 KB unsent is closed. Room and audience pages poll
 notifications instead of opening a second stream, so several mixes fit in a
 browser's six-connection limit.
+
+## Reactions
+
+A reaction is rate limited per person, counted in memory and sent as a small
+total every 250 ms to the audience stream and the project's member stream, so
+the people on stage see it whatever the audience's size. Nothing is written. A
+total for a performance that has since ended is dropped. The stage floats at
+most ten at once and always keeps a running tally, which is all reduced motion
+shows; nothing takes focus, and a screen reader hears a summary at most every 30
+seconds. Broadcasts with no event row carry no `id:` line, so they cannot move a
+browser's `Last-Event-ID`.
+
+## Sections and sequences
+
+A section is a scene. Who plays in it is its `scene_assignment` rows: a null clip
+slot means silent there, so "this character stops after eight bars" is an
+eight-bar section followed by one it is not in. A sequence is the saved
+arrangement: up to 8 entries of 1–16 bars, looping or resting on its last
+section. Any member may say who plays; the host names sections, edits the
+sequence, launches and runs. Saving never touches what is sounding. Running
+writes a plan, so late joiners, audiences and a new host all follow it, at the
+same phase; Stop and restart drop the running sequence and keep the saved one.
+
+**Suggest a build-up** works from the roles on stage and nothing else. The same
+band always gets the same answer, it is shown in words first, and `sections.apply`
+writes it in one transaction only after a person presses Use this.
+
+## Export
+
+Export audio is browser-only and members-only: there is no server route for it
+and none in the audience view. It reads one fresh snapshot, builds a plan from bar
+zero (`exportPlan`) and renders it on an engine of its own, a few bars at a time.
+The live engine, its context, the transport and hosting are not touched.
+
+Levels: full device level (1.0) through the same voices, master, limiter, ceiling
+and safety curve as live playback, so a personal volume, Solo or preview never
+reaches the file. Limits: 240 seconds, 256 bars, 60,000 sounds. Output: 16-bit
+stereo WAV at 44.1 kHz, with 2 seconds of tail.
 
 ## Performance plans, hosting and time
 
@@ -314,12 +466,15 @@ own.
 Each browser renders its own audio after a local gesture; the server never
 renders or streams sound. `client/audio.ts` queries Strudel patterns at global
 cycles and schedules native WebAudio voices about 160 ms ahead. It implements
-exactly the grammar's vocabulary: four synthesised drums, four oscillator
-waveforms, gain, release, low-pass, stereo pan and a reverb send. Every voice
-passes a fixed master gain and a limiter, and device volume only scales
-before them. A sound name outside the vocabulary is skipped, never replaced.
-Preview plays one part on this device on its own loop and leaves that part's
-shared version out while it runs. Skipped late sounds are counted and
+exactly the grammar's vocabulary: ten synthesised drums, six voices, gain, an
+envelope, low- and high-pass filters, frequency modulation, stereo pan, a reverb
+send and a tempo-locked echo send. Every voice passes a fixed master gain, a
+limiter and a safety curve that is exactly linear below 0.85, and device volume
+only scales before them. A sound name outside the vocabulary is skipped, never replaced.
+Preview plays on this device only and leaves that part's shared version out while
+it runs: on its own loop when the mix is stopped, and in step with the mix when it
+plays, so a change can be heard in context. Offline renders run on a separate
+engine instance. Skipped late sounds are counted and
 reported.
 
 ## What is fixed by the course

@@ -1,10 +1,25 @@
 # Feature backlog — twenty candidates, RICE ranked
 
 Twenty things Ensemble could gain next, across UI, actions, art, elements,
-mechanics and user education. **None of these are built.** What is built is in
-[the contract](contract.md); the direction they have to serve is
+mechanics and user education, as ranked on 28 October 2026. The ranking is kept as
+it was written. Since then, the feedback from people who tried it and a request for
+a character workflow moved several rows up: see [what has been built](#built-since).
+What is built is in [the contract](contract.md); the direction they have to serve is
 [the Ensemble contract](ensemble-contract.md); the framing is in
 [the PR/FAQ](pr-faq.md).
+
+## Built since
+
+Built on 7 November 2026: #1 Per-part Solo, #6 Performers move on their own onsets,
+#10 is covered in part by the new stage rather than per pack, #11 A fourth preset
+pack (six were added), #13 Audience reactions land on the stage, #14 Scene launcher
+in the room, #16 Performer wardrobe (as the character creator), #17 Render the mix
+to a file, #19 Step grid as a third view.
+
+The ranking was wrong about #19 in one specific way: it assumed the grid would be a
+model that disables itself on most parts. Built as a lens over the source, it shows
+all 72 characters. It says nothing yet about whether newcomers use it, which is what
+the score's low confidence was really about.
 
 ## How the scores were made
 

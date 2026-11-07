@@ -8,6 +8,32 @@ through a grid). What is built, and where each rule lives, is in
 [contract](contract.md); trade-offs are in [architecture](architecture.md);
 what has been checked is in [verification](verification.md).
 
+## Changes agreed on 7 November 2026
+
+This section overrides anything below it that disagrees.
+
+- The product is a collaborative, editable Incredibox with a real character
+  workflow. Governing principle: a beginner can make something enjoyable
+  immediately, and an experienced person can precisely customise the same
+  creation through visual tools or Strudel code.
+- **Visual direction** is Main Stage (`docs/design/`): a band under one spotlight
+  on a violet wall and a warm floor, cream sheets for tools, Bricolage Grotesque
+  and DM Sans, self-hosted. This replaces the inky stage and mint primary in
+  section 5.
+- **Characters** are composable, saved, shared and remixed. A character's look is
+  structured data, drawn from sixteen bodies and combinable traits.
+- **The cast** is 72 characters in nine packs. The first 24 are unchanged. Section
+  6's three packs are now the first three of nine.
+- **A step grid exists after all**, as a lens over the source. Section 4's rule
+  stands: nothing is flattened or approximated. What the grid cannot hold is
+  locked with a reason.
+- **Words**: mix, character, track and section, as set out in the
+  [contract](contract.md).
+- Sections, performer-visible reactions, audio export and deletion are part of the
+  product. Their rules are in the [contract](contract.md).
+- **AI transitions are not built.** A deterministic Suggest a build-up covers the
+  useful part without a service, a key or nondeterministic shared playback.
+
 ## 1. Direction
 
 The interaction reference is Incredibox: choose a sound, give it to a

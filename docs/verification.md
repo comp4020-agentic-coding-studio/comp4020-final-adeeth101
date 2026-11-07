@@ -1,5 +1,123 @@
 # Verification record
 
+## 7 November 2026: characters, the step grid and the Main Stage
+
+### Baseline
+
+Before any change, at `4d5f380`, on production assets and an isolated database:
+`pnpm check` 274 tests in 28 files passed, `pnpm test:browser` 15 of 15 passed, and
+`pnpm check:evidence` passed.
+
+### Checks
+
+| Check | Result |
+| --- | --- |
+| `pnpm check` | 510 tests in 35 files passed |
+| `pnpm test:browser` | 32 flows passed, at 1920×1080 and 390×844 where they matter |
+| `pnpm check:evidence` | Passed |
+| The 14-step journey, repeated | 5 of 5 after the fix described below |
+| Migration 3 | Against a database written by the previous release over HTTP: every project, track, clip, revision, member, chat, visitor, invitation, performance and saved-sound row identical; the backup verified; a second boot changes nothing |
+
+The 15 flows from before this work still pass. Six things in them changed, all
+because wording was meant to change: `Add your first performer`, `Add a performer`,
+`Close the sound tray`, `Save as new part` and the conflict text are now
+`…character`, `…character`, `Close the cast`, `Save as new track` and `…this track`,
+and two assertions in `spec/studio.test.ts` moved from `12 parts` and `editing this
+part` to the new words. What each one asserts is the same. In `spec/expr.test.ts` the
+fixed count of 24 presets became a stricter check that the first 24 match a frozen
+fixture byte for byte, and `spec/migration.test.ts` expects migration 3 as the latest.
+
+### What the journey covers
+
+`spec/browser/journey.pw.ts` runs three separate browser contexts against a server
+of its own: create a character from nothing; design it, confirming each choice
+changes the drawing; write a melody on the grid; read and edit the same music as
+Strudel, and see it on the grid; save, reload and reopen; share an unlisted link to a
+second identity, who previews it and saves a credited copy; bring both copies into
+one mix; make a stale grid draft in a second tab, have it refused and recover it;
+perform to a third identity; see that identity's reactions on the host's and a
+collaborator's stage; set who plays in a section and run a sequence, which reaches
+the audience; export a WAV and read its header and level; stop sharing and delete the
+original while the copy survives; then kill the server and find everything saved but
+the music stopped.
+
+### Faults found while building this
+
+- **Offline renders were contaminated, and the table below was wrong.** The old
+  `renderOffline` borrowed the live engine by swapping its context, and the live test
+  loop kept scheduling into it, so kicks leaked into every render. An A/B against the
+  old build showed peaks up to 18.9 dB too high and one preset's RMS 14 dB too high: a
+  soft triangle bass reported the kick's −3.5 dBFS. Renders now have their own engine.
+  The 26 October figures below are kept as written, and these replace them.
+- **The densest mix touched full scale.** The twelve busiest characters reached
+  +0.1 dBFS with 2 clipped samples, because the limiter's 3 ms attack lets the fastest
+  peaks through. A safety curve, exactly linear below 0.85, now holds it at −0.4 dBFS.
+  Everything else measured sits below the curve and is unchanged.
+- **A blank drum character lost its rows.** Placing the first kick removed the snare,
+  hat and clap rows, because they were offered only while the kit was empty. Found by
+  a browser flow.
+- **`id: 0` reset reconnects.** Ephemeral broadcasts carried `id: 0`, which reset a
+  browser's `Last-Event-ID`, so a reconnect replayed nothing. This predates this work.
+- **Members were not told why a deleted mix went.** Streams were closed before the
+  event reached them. The event now goes first.
+- **Saving could open the wrong draft.** An abandoned blank character would have
+  reappeared when opening a remix. Drafts are now kept per starting point.
+- A parse fault in the step grid (`[a b]` read as two slots) and a false "Saved." on a
+  fresh remix were found by inspection, and the phone creator's overflow, low-contrast
+  credits and a clipped kit label from looking at screenshots.
+- The journey failed once in six runs. It was the test's own race, reading the debug
+  probe before calibration finished, which `recovery.pw.ts` already allows for. The
+  product was not at fault.
+
+### Audio measurement
+
+`pnpm test:audio`, through the real output chain at full device level, in isolated
+renders. Automated measurements only: **nobody has listened to these.**
+
+| Measure | Observed |
+| --- | --- |
+| The 72 characters alone | Peak −24.2 to −3.5 dBFS, RMS −51.3 to −18.6, median −29.0, no clipped samples |
+| Each pack, all eight at once (9 mixes) | Peak −3.6 to −2.4 dBFS, RMS −21.0 to −14.4, no clipped samples |
+| Busiest bar of a pack | 19 to 90 sounds |
+| Twelve dense characters from the first three packs | −1.5 dBFS peak, −14.4 RMS, none clipped |
+| The twelve busiest in the catalogue | −0.4 dBFS peak, −17.3 RMS, none clipped, 208 sounds in the busiest bar |
+| Late join | Scheduled from cycle 2; 0 ms disagreement on shared onsets, on one machine |
+
+The sparsest textures read low on RMS because they are mostly silence. `night-ticks`
+is the quietest of the original 24 at −50.3, and it stays as it was, because a shipped
+character is not rewritten.
+
+Every character is also checked against Strudel's own output after a forced rewrite
+of every step: onsets, notes, lengths and gains are identical over 16 bars. Drum
+lengths are excluded, because a drum's length comes from its sound, not its step.
+
+### Resource probe
+
+The production image at `--memory=256m`, with 40 visitors saving and listing 200
+characters, then `scripts/load-proof.mjs`:
+
+| Measure | Observed |
+| --- | --- |
+| Image | 246 MB, unchanged |
+| Memory | 34 MiB idle, 43.7 MiB peak |
+| Saving and listing 200 characters | 0.6 s; library search median 2 ms, worst 4 ms |
+| Streams | 48 open, 12 refused at the cap; 300 connect/drop cycles in 353 ms |
+| Audience | 32 admitted, the 33rd refused |
+| `/healthz` under load | 1 ms |
+| Chromium at 12 × 64 onsets a bar | 384 of 384 events/s voiced, at 1× and at 4× CPU throttling; slowest pass 10 ms and 151 ms |
+
+This shows the caps hold and the machine has room. It does not show that 32 people on
+the Fly machine have a good time.
+
+### Design directions
+
+See [the design record](design/README.md). Frame rate did not separate the three
+directions, so the choice was a judgement. The finished interface was inspected in
+real screenshots at both viewports, including a full stage of twelve. Automated axe
+checks found no WCAG 2 A/AA violation on the stage, cast, sections, export, settings,
+step grid, creator or Characters pages at both viewports. That is not the same as
+having been tried by a person using a screen reader.
+
 ## 28 October 2026: deployed three-profile check
 
 Release `7f66d94` passed [GitHub checks and deployment](https://github.com/comp4020-agentic-coding-studio/comp4020-final-adeeth101/actions/runs/40541854705).
@@ -213,6 +331,10 @@ migrates cleanly on its own.
 
 ### Audio measurement
 
+> **Corrected 7 November 2026.** The offline figures in this table were inflated by a
+> fault found later: the live test loop leaked into every render. See that day's
+> entry above for the true figures. The table is kept as it was recorded.
+
 `pnpm test:audio` (`scripts/audio-proof.mjs`), two Chromium pages, the second
 joining 2.2 s late: the late page scheduled from cycle 2, not cycle 0, and the
 shared onsets were scheduled at identical server timestamps (0 ms
@@ -270,8 +392,18 @@ and the v1 limits it protects are still in force for v1 parts.
 
 - **Anyone using it.** No uncoached person has used Ensemble. The 30-second
   first-sound and two-minute first-contribution targets are hypotheses.
-- **Whether it sounds good.** Nobody has listened to the 24 presets, alone or
-  combined, on real speakers. Levels are measured; taste is not.
+- **Whether it sounds good.** Nobody has listened to the 72 characters, alone or
+  combined, on real speakers, and that includes the six new sounds in the engine and
+  whether they sound like what their names promise. Levels are measured; taste is
+  not.
+- **Whether the new tools make sense to anyone.** No newcomer has tried the creator,
+  the step grid or Sections. Whether a person understands that Pattern and Code are one
+  thing, or what Who plays does, is untested.
+- **The creator on a real phone.** Checked in an emulated viewport only.
+- **A screen reader in the step grid.** The labels and roving focus are tested; no
+  one has used a 200-button grid by ear.
+- **Moderating public characters.** There is no reporting route. A person can block
+  an author for themselves; nothing removes a listing for everyone except its owner.
 - **A real phone.** 4× CPU throttling is a stand-in, not a measurement.
 - **Two devices on a network.** Onset disagreement and output latency between
   machines are unmeasured.

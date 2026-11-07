@@ -10,6 +10,11 @@ to is [the feature backlog](feature-backlog.md).
 
 ---
 
+> **Status, 7 November 2026.** This was written on 28 October, before the character
+> workflow. Since then Ensemble has gained a character creator and library, a step
+> editor, sections, performer-visible reactions and audio export. Where this document
+> says one of those does not exist, [the contract](contract.md) is now the record.
+
 ## Press release
 
 ### Ensemble lets a group make a mix together, change every sound, and play it live

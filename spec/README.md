@@ -44,7 +44,7 @@ Against the running app (`APP_URL`), unless noted:
 
 | File | Protects |
 | --- | --- |
-| `expr.test.ts` | The expression grammar: what it accepts and refuses, exact bounds before expansion, agreement with Strudel 1.2.6's `mini()`, all 24 presets |
+| `expr.test.ts` | The expression grammar: what it accepts and refuses, exact bounds before expansion, agreement with Strudel 1.2.6's `mini()`, the whole cast, and the first 24 characters pinned byte for byte by `fixtures/catalogue-v1.json` |
 | `studio.test.ts` | Rooms: presets, the twelve-part limit, any member editing any part with stable credit, stale revisions, leases, invalid code never saved, verbatim source, idempotency, host-only transport, chat, SSE, export/import |
 | `access.test.ts` | The permission matrix over HTML, API, SSE, export, chat, discovery and the legacy routes; public and unlisted reading; streams revoked on removal or going private; roles; eight active editors |
 | `social.test.ts` | Friends, blocks, rate limits, generic online status, invitation lifecycle, a six-way race for a one-use link |
@@ -54,6 +54,15 @@ Against the running app (`APP_URL`), unless noted:
 | `migration.test.ts` | Own server on `fixtures/stream-v1.db`: every Stream record survives, roles follow authorship, a verified backup restores |
 | `restart.test.ts`, `logging.test.ts` | Own server: queued changes cancelled on restart; who did what in the log |
 | `music.test.ts`, `pattern.test.ts` | Version 1 trees and the earlier sketchpad's pattern grammar |
+| `steps.test.ts` | The step grid: reading changes nothing, an edit touches only what it edits, locked steps survive verbatim, and every one of the 72 characters sounds identical after a forced rewrite, by Strudel's own output |
+| `characters.test.ts` | Saved characters: private by default, validated looks and source, revisions, listing as a snapshot, links, copies and tracks that outlive their original, nothing about a mix travelling with one |
+| `deletion.test.ts` | Removing tracks, deleting, restoring and purging mixes, leaving, and what each one takes with it |
+| `reactions.test.ts` | Reactions reach members as bounded totals, write nothing, respect access, and stop when a performance ends |
+| `sections.test.ts` | Who plays where, running and stopping a sequence, host authority, late joiners, and Suggest a build-up |
+| `export.test.ts` | What an export renders, its limits and the WAV it writes |
+| `migration-characters.test.ts` | Own server on `fixtures/ensemble-v2.db`, written by the previous release over HTTP: every row kept, sounds become characters, verified backup |
+| `browser/journey.pw.ts` | The whole creative journey across three browsers and a server restart: create, draw, write music on the grid and in code, save, share, collaborate, resolve a conflict, perform, react, arrange, export real audio, unlist, restart |
+| `browser/creative.pw.ts` | Grid and code as one truth, keyboard use, focus through background updates, an export that leaves playback alone, deletion and accessibility of the new surfaces at both viewports |
 | `browser/*.pw.ts` | The whole journey across three browsers at 1920×1080 and 390×844, conflicts, keyboard-only use with axe, refused audio, polling fallback, losing the server |
 
 `helpers.ts` holds the shared HTTP helpers and is not a test.
