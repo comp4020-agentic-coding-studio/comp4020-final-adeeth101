@@ -245,26 +245,26 @@ export function guestCommand(v:Visitor,performanceId:string,input:Row){
   const r=tx(after=>{
     const a=readPerformance(v,performanceId),p=a.performance,payload=input.payload??{},now=Date.now();
     need(p.status==='live','This performance has ended.',410);
-    need(a.role==='performer','Only invited performers add guest parts. Members edit the mix in the project room.',403);
+    need(a.role==='performer','Only invited performers bring guest characters. Members edit the mix in its room.',403);
     let entityId:string;
     if(type==='guest.add'){
-      need(Number(one('select count(*) as n from track where project_id=? and archived_at is null',p.project_id)!.n)<ROOM_LIMITS.parts,`The stage has room for ${ROOM_LIMITS.parts} parts.`,409);
-      need(Number(one('select count(*) as n from track where guest_performance_id=? and owner_id=? and archived_at is null',p.id,v.id)!.n)<3,'Guest performers bring up to three parts.',409);
+      need(Number(one('select count(*) as n from track where project_id=? and archived_at is null',p.project_id)!.n)<ROOM_LIMITS.parts,`The stage holds ${ROOM_LIMITS.parts} characters.`,409);
+      need(Number(one('select count(*) as n from track where guest_performance_id=? and owner_id=? and archived_at is null',p.id,v.id)!.n)<3,'Guest performers bring up to three characters.',409);
       let name:string,role:string|null=null,source:string,provenance:Row,look:unknown=null;
       if(typeof payload.presetId==='string'){const pr=presetById(payload.presetId);need(pr,'That sound is not in the catalogue.',404);name=pr!.name;role=pr!.role;source=pr!.source;look=pr!.look;provenance={preset:{id:pr!.id,version:pr!.version},guest:true};}
       else if(typeof payload.characterId==='string'){const c=characterForPart(v,payload.characterId);name=c.name;role=c.role;source=c.source;look=c.look;provenance={...c.provenance,guest:true};}
-      else{source=code(payload.source);name=text(payload.name??'Guest part',40,'the part a name');provenance={via:'code',guest:true};}
+      else{source=code(payload.source);name=text(payload.name??'Guest track',40,'the track a name');provenance={via:'code',guest:true};}
       const doc=guestDocument(source);entityId=randomUUID();
       const position=Number(one('select coalesce(max(position),-1)+1 as p from track where project_id=?',p.project_id)!.p);
       run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,guest_performance_id,look_json) values(?,?,?,?,?,1,null,?,?,?,?,?)',entityId,p.project_id,v.id,name,position,role,typeof payload.presetId==='string'?payload.presetId:null,typeof payload.presetId==='string'?1:null,p.id,look?JSON.stringify(look):null);
       const clipId=randomUUID();run('insert into clip values(?,?,?,1)',clipId,entityId,'A');run('insert into clip_revision values(?,1,2,?,?,?,?,?)',clipId,JSON.stringify(doc),source,JSON.stringify(provenance),v.id,now);
       for(const s of SLOTS)run('insert into scene_assignment values(?,?,?,?)',p.project_id,s,entityId,'A');
     }else{
-      const tr=one('select * from track where id=? and guest_performance_id=? and owner_id=?',payload.trackId,p.id,v.id);need(tr,'You can only change your own guest parts.',403);need(!tr!.archived_at,'This guest part has been removed. Your draft stays on this device.',410);entityId=tr!.id;
+      const tr=one('select * from track where id=? and guest_performance_id=? and owner_id=?',payload.trackId,p.id,v.id);need(tr,'You can only change your own guest tracks.',403);need(!tr!.archived_at,'This guest track has been removed. Your draft stays on this device.',410);entityId=tr!.id;
       if(type==='guest.edit'){
         const source=code(payload.source),doc=guestDocument(source),c=one("select * from clip where track_id=? and slot='A'",tr!.id)!;
         need(Number.isInteger(input.expectedRevision)&&input.expectedRevision>=1,'Editing needs the saved part revision.',422);
-        if(c.current_revision!==input.expectedRevision)throw new CommandError('This part changed in another tab. Your draft is safe.',409);
+        if(c.current_revision!==input.expectedRevision)throw new CommandError('This track changed in another tab. Your draft is safe.',409);
         run('update clip set current_revision=? where id=?',c.current_revision+1,c.id);run('insert into clip_revision values(?,?,2,?,?,?,?,?)',c.id,c.current_revision+1,JSON.stringify(doc),source,JSON.stringify({via:'code',guest:true}),v.id,now);
       }else if(type==='guest.remove')run('update track set archived_at=? where id=?',now,tr!.id);
       else throw new CommandError('Unknown command.');

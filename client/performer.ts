@@ -185,3 +185,18 @@ export function characterSvg(l:CharacterLook,opts:DrawOptions={}){
 }
 // A part with no stored look: drawn from its role and id, never saved.
 export function performerSvg(role:Look,seed:string,look?:CharacterLook|null){return characterSvg(look??defaultLook(role,seed));}
+// How each role answers its own sound. Shape is told by the drawing and words by
+// the label; this only adds life, and reduced motion leaves it out.
+const STEP={
+  beats:[{transform:'translateY(0) scale(1,1)'},{transform:'translateY(5%) scale(1.05,.93)'},{transform:'translateY(0) scale(1,1)'}],
+  bass:[{transform:'scale(1,1)'},{transform:'scale(1.06,.95)'},{transform:'scale(1,1)'}],
+  melody:[{transform:'rotate(0)'},{transform:'rotate(-3.5deg) translateY(-3%)'},{transform:'rotate(0)'}],
+  texture:[{transform:'translateY(0)'},{transform:'translateY(-4%)'},{transform:'translateY(0)'}],
+  custom:[{transform:'translateY(0)'},{transform:'translateY(-5%)'},{transform:'translateY(0)'}],
+};
+export function moveCharacter(li:Element,role:string){
+  li.querySelector('.rig')?.animate(STEP[role as keyof typeof STEP]??STEP.custom,{duration:220,easing:'ease-out'});
+  li.querySelector('.arm-l')?.animate([{transform:'rotate(0)'},{transform:'rotate(16deg)'},{transform:'rotate(0)'}],{duration:220,easing:'ease-out'});
+  li.querySelector('.arm-r')?.animate([{transform:'rotate(0)'},{transform:'rotate(-16deg)'},{transform:'rotate(0)'}],{duration:220,easing:'ease-out'});
+  li.querySelector('.woofer')?.animate([{transform:'scale(1)'},{transform:'scale(1.09)'},{transform:'scale(1)'}],{duration:180,easing:'ease-out'});
+}

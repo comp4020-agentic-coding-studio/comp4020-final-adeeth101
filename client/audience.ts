@@ -3,7 +3,8 @@
 // audience snapshot, never the project, and offers no project controls.
 import {request,type ApiError} from './api.ts';
 import {esc,$,toast,fail,errorText,on,ago} from './ui.ts';
-import {performerSvg} from './performer.ts';
+import {performerSvg,moveCharacter,type Look} from './performer.ts';
+import {ReactionStage,REACTION_FACE} from './reactions.ts';
 import {connect,calibrate,type LiveState} from './live.ts';
 import {enable,current,deviceVolume,setDeviceVolume,soundOn} from './sound.ts';
 import {PACKS,ROLE_LABEL,type Role} from '../shared/presets.ts';
@@ -25,11 +26,16 @@ export async function mountAudience(host:HTMLElement,id:string){
   host.innerHTML=`<div class="audience"><header class="room-head"><div class="room-title"><p class="eyebrow" id="aud-state"></p><h1 id="aud-title"></h1></div>
     <div class="room-actions"><button class="primary" data-act="listen" id="listen"></button><label class="volume"><span class="sr-only">Volume on this device</span><input id="aud-volume" type="range" min="0" max="1" step="0.05" aria-label="Volume on this device"></label></div></header>
     <p class="status-line" id="aud-status" role="status" aria-live="polite"></p>
-    <div class="room-body"><section class="stage-wrap" aria-label="Performers"><ol class="stage" id="aud-stage"></ol><div id="aud-tools"></div></section>
-    <aside class="drawer chat-side" aria-label="Audience chat"><h2>Audience chat</h2><ol class="chat-log" id="aud-chat" aria-live="polite"></ol>
-      <div class="reactions" role="group" aria-label="Reactions">${[['clap','👏'],['heart','❤️'],['fire','🔥'],['wave','👋']].map(([k,e])=>`<button class="ghost" data-act="react" data-r="${k}" aria-label="React ${k}">${e}</button>`).join('')}</div>
+    <div class="room-body"><section class="stage-wrap" aria-label="Performers"><p id="reaction-tally" class="reaction-tally" hidden></p><ol class="stage" id="aud-stage"></ol><div id="reaction-layer" class="reaction-layer" aria-hidden="true"></div><p id="reaction-voice" class="sr-only" role="status" aria-live="polite"></p></section>
+    <aside class="drawer chat-side paper" aria-label="Audience chat"><h2>Audience chat</h2><ol class="chat-log" id="aud-chat" aria-live="polite"></ol>
+      <div class="reactions" role="group" aria-label="Reactions">${Object.entries(REACTION_FACE).map(([k,e])=>`<button class="ghost" data-act="react" data-r="${k}" aria-label="React ${k}">${e}</button>`).join('')}</div>
       <form id="aud-form" class="chat-form"><label for="aud-input" class="sr-only">Message</label><textarea id="aud-input" rows="2" maxlength="500" placeholder="Say something"></textarea><button class="primary" type="submit">Send</button></form></aside></div>
-    <div id="burst" class="burst" aria-hidden="true"></div><dialog id="guest-editor" class="guest-editor" aria-labelledby="guest-editor-title"></dialog></div>`;
+    <div id="aud-tools" class="tools-wrap"></div><dialog id="guest-editor" class="guest-editor paper" aria-labelledby="guest-editor-title"></dialog></div>`;
+  const reactions=new ReactionStage($('#reaction-layer',host)!,$('#reaction-tally',host)!,$('#reaction-voice',host)!);
+  const drawings=new Map<string,string>();
+  const figure=(p:AudienceSnapshot['parts'][number])=>{const key=`${p.id}:${JSON.stringify(p.look)}`;let svg=drawings.get(key);if(!svg){svg=performerSvg(p.role as Look,p.id,p.look);drawings.set(key,svg);}return svg;};
+  const lastMove=new Map<string,number>();
+  let mine:{id:string;name:string}[]=[];
   const vol=$<HTMLInputElement>('#aud-volume',host)!;vol.value=String(deviceVolume());
   vol.addEventListener('input',()=>setDeviceVolume(Number(vol.value)));
   const guestEditor=new GuestEditor($<HTMLDialogElement>('#guest-editor',host)!,s.you.id,id,{
@@ -47,11 +53,11 @@ export async function mountAudience(host:HTMLElement,id:string){
     $('#aud-status',host)!.textContent=!live?'Thanks for listening.':full?`This performance is full (${s.capacity} listeners). This page checks again every few seconds.`:connection==='busy'?'Live updates are busy, so this page checks every second instead.':connection==='reconnecting'?'Reconnecting…':listening?(s.transport.status==='playing'?'Listening. Everyone hears the same bar in their own browser.':`Waiting for ${s.hostHandle} to start the music.`):`Hosted by ${s.hostHandle}. You can listen and chat; you can’t change the mix.`;
     const stageMarkup=s.parts.map(p=>{
       const mine=s.you.role==='performer'&&p.guest&&p.ownerId===s.you.id;
-      return `<li class="performer role-${p.role}" data-part="${p.id}">${mine?`<button class="performer-btn" data-act="guest-open" data-id="${p.id}" aria-label="Edit ${esc(p.name)}">`:'<div class="performer-btn static">'}${performerSvg(p.role,p.id)}<span class="nameplate"><strong>${esc(p.name)}</strong><span class="role-tag">${ROLE_LABEL[p.role as Role]??'Custom'}${p.guest?' · guest':''}</span></span>${mine?'</button>':'</div>'}<span class="credit">${esc(p.addedBy)}</span></li>`;
+      return `<li class="performer role-${p.role}" data-part="${p.id}">${mine?`<button class="performer-btn" data-act="guest-open" data-id="${p.id}" aria-label="Edit ${esc(p.name)}">`:'<div class="performer-btn static">'}<span class="figure-box">${figure(p)}</span><span class="nameplate"><strong>${esc(p.name)}</strong><span class="role-tag">${ROLE_LABEL[p.role as Role]??'Custom'}${p.guest?' · guest':''}</span></span>${mine?'</button>':'</div>'}<span class="credit">${esc(p.addedBy)}</span></li>`;
     }).join('')||'<li class="stage-note">The stage is empty for now.</li>';
-    if(stageMarkup!==lastStage){$('#aud-stage',host)!.innerHTML=stageMarkup;lastStage=stageMarkup;}
+    if(stageMarkup!==lastStage){const stage=$('#aud-stage',host)!;stage.innerHTML=stageMarkup;stage.className=`stage ${s.parts.length<=4?'':s.parts.length<=7?'fit-m':'fit-s'}`;lastStage=stageMarkup;}
     const you=s.you,host2=you.role==='host';
-    if(live&&you.role==='performer'&&connection!=='reconnecting')$('#aud-status',host)!.textContent='You’re performing. Select your own part to edit its sound or Strudel code. Changes join the shared mix at the next bar.';
+    if(live&&you.role==='performer'&&connection!=='reconnecting')$('#aud-status',host)!.textContent='You’re performing. Select your own character to edit its sound or Strudel code. Changes join the shared mix at the next bar.';
     guestEditor.update(s.yourParts??[],live&&you.role==='performer'&&(connection==='live'||connection==='busy'),!live?'This performance has ended or your access was removed. Your draft stays on this device; you can copy it.':connection==='reconnecting'?'Reconnecting. Your draft stays on this device.':'Only guest performers can edit their session parts.');
     const toolsMarkup=`<section class="credits"><h2>Performers</h2><ul class="people">${s.performers.map(p=>`<li><strong>${esc(p.handle)}</strong> <span class="small muted">${p.role}</span>${host2&&p.role==='performer'?` <button class="ghost small" data-act="mod" data-a="remove" data-id="${p.id}">Remove</button>`:''}</li>`).join('')}</ul></section>
       ${live&&you.role==='listener'?`<p>${you.request==='pending'?'<span class="pill">Request sent</span> The host will see it.':you.request==='declined'?'The host declined your request.':'<button class="outline" data-act="request">Ask to perform</button>'}</p>`:''}
@@ -64,9 +70,8 @@ export async function mountAudience(host:HTMLElement,id:string){
     $<HTMLTextAreaElement>('#aud-input',host)!.placeholder=you.muted?'The host muted you in this chat':live?'Say something':'Chat is closed';
   }
   function guestTools(){
-    const presets=PACKS.flatMap(p=>p.presets);
-    return `<section class="guest card"><h2>You’re performing</h2><p class="small">Add a part of your own. It plays only during this performance; a member can keep a copy.</p>
-      <form data-form="guest" class="row"><label for="guest-sound">Sound</label><select id="guest-sound">${presets.map(p=>`<option value="${p.id}">${esc(p.name)} · ${ROLE_LABEL[p.role]}</option>`).join('')}</select><button class="primary" type="submit">Add</button></form>
+    return `<section class="guest card"><h2>You’re performing</h2><p class="small">Bring a character of your own. It plays only during this performance; a member can keep a copy.</p>
+      <form data-form="guest" class="row"><label for="guest-sound">Character</label><select id="guest-sound">${mine.length?`<optgroup label="My characters">${mine.map(c=>`<option value="saved:${c.id}">${esc(c.name)}</option>`).join('')}</optgroup>`:''}${PACKS.map(k=>`<optgroup label="${esc(k.name)}">${k.presets.map(p=>`<option value="${p.id}">${esc(p.name)} · ${ROLE_LABEL[p.role]}</option>`).join('')}</optgroup>`).join('')}</select><button class="primary" type="submit">Add</button></form>
       ${s.parts.filter(p=>p.guest&&p.ownerId===s.you.id).map(p=>`<p class="small">${esc(p.name)} <button class="outline small" data-act="guest-open" data-id="${p.id}">Edit</button> <button class="ghost small" data-act="guest-remove" data-id="${p.id}">Remove</button></p>`).join('')}</section>`;
   }
   function renderChat(){
@@ -86,7 +91,7 @@ export async function mountAudience(host:HTMLElement,id:string){
   on(host,'click','[data-act]',async b=>{
     const act=b.dataset.act!;
     if(act==='guest-open'){await guestEditor.open(b.dataset.id!);return;}
-    if(act==='listen'){guestEditor.suspendPreview();if(listening){current()?.stop();listening=false;render();return;}try{const a=await enable();a.onBeat=(t,d)=>setTimeout(()=>{const li=$(`[data-part="${t}"]`,host);if(li&&!matchMedia('(prefers-reduced-motion: reduce)').matches){li.classList.remove('hit');void (li as HTMLElement).offsetWidth;li.classList.add('hit');}},d);listening=true;syncAudio();}catch(e){toast(errorText(e));}render();return;}
+    if(act==='listen'){guestEditor.suspendPreview();if(listening){current()?.stop();listening=false;render();return;}try{const a=await enable();a.onBeat=(t,d)=>setTimeout(()=>{const now=performance.now();if(document.hidden||matchMedia('(prefers-reduced-motion: reduce)').matches||now-(lastMove.get(t)??0)<110)return;lastMove.set(t,now);const li=$(`[data-part="${t}"]`,host);if(li)moveCharacter(li,s.parts.find(p=>p.id===t)?.role??'custom');},d);listening=true;syncAudio();}catch(e){toast(errorText(e));}render();return;}
     if(act==='react'){await request(`/api/performances/${id}/react`,{reaction:b.dataset.r});return;}
     if(act==='request'){await request(`/api/performances/${id}/moderate`,{action:'request'});await refresh();return;}
     if(act==='mod'){await request(`/api/performances/${id}/moderate`,{action:b.dataset.a,visitorId:b.dataset.id,messageId:b.dataset.msg?Number(b.dataset.msg):undefined});await refresh();await loadChat();return;}
@@ -95,7 +100,7 @@ export async function mountAudience(host:HTMLElement,id:string){
   });
   host.addEventListener('submit',e=>{e.preventDefault();const f=e.target as HTMLFormElement;(async()=>{
     if(f.id==='aud-form'){const input=$<HTMLTextAreaElement>('#aud-input',host)!,body=input.value.trim();if(!body)return;input.value='';const o={clientId:crypto.randomUUID(),body,failed:false};outbox.push(o);renderChat();await deliver(o);}
-    if(f.dataset.form==='guest'){const pid=$<HTMLSelectElement>('#guest-sound',f)!.value;const r=await request(`/api/performances/${id}/commands`,{commandId:crypto.randomUUID(),type:'guest.add',payload:{presetId:pid}});await refresh();toast(s.transport.status==='playing'?`Added · joins bar ${r.effectiveCycle+1}`:'Added. It plays when the host starts the music.');}
+    if(f.dataset.form==='guest'){const pid=$<HTMLSelectElement>('#guest-sound',f)!.value;const r=await request(`/api/performances/${id}/commands`,{commandId:crypto.randomUUID(),type:'guest.add',payload:pid.startsWith('saved:')?{characterId:pid.slice(6)}:{presetId:pid}});await refresh();toast(s.transport.status==='playing'?`Added · joins bar ${r.effectiveCycle+1}`:'Added. It plays when the host starts the music.');}
   })().catch(fail);});
   on(host,'keydown','#aud-input',(t,e)=>{const k=e as KeyboardEvent;if(k.key==='Enter'&&!k.shiftKey){k.preventDefault();(t.closest('form') as HTMLFormElement).requestSubmit();}});
   async function deliver(o:{clientId:string;body:string;failed:boolean}){
@@ -103,13 +108,13 @@ export async function mountAudience(host:HTMLElement,id:string){
       catch(e){const st=(e as ApiError).status;if(st&&st<500&&st!==429){toast(errorText(e));break;}await new Promise(r=>setTimeout(r,800*(i+1)));}}
     o.failed=true;renderChat();
   }
-  function burst(r:string){if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;const e={clap:'👏',heart:'❤️',fire:'🔥',wave:'👋'}[r];if(!e)return;const span=document.createElement('span');span.textContent=e;span.style.left=`${10+Math.random()*80}%`;$('#burst',host)!.append(span);setTimeout(()=>span.remove(),1600);}
   let pending:ReturnType<typeof setTimeout>|null=null;
+  if(s.you.role==='performer')mine=await request('/api/characters').then(r=>r.characters).catch(()=>[]);
   // A full audience: keep checking for a free place, then join the stream.
   while(s.full&&s.status==='live'){render();await new Promise(r=>setTimeout(r,5000));await refresh();}
   if(s.status==='live'){
     liveConnection=connect(()=>`/api/performances/${id}/events?since=${s.eventId}`,{
-      change:(kind,data)=>{if(kind==='reaction'){burst(data.reaction);return;}if(kind==='chat'||kind==='chat.filter'||kind==='moderation.delete'){void loadChat();}if(kind==='performance.ended'){void refresh();return;}if(!pending)pending=setTimeout(()=>{pending=null;void refresh();},80);},
+      change:(kind,data)=>{if(kind==='reaction'){reactions.add(data.counts??{});return;}if(kind==='chat'||kind==='chat.filter'||kind==='moderation.delete'){void loadChat();}if(kind==='performance.ended'){reactions.clear();void refresh();return;}if(!pending)pending=setTimeout(()=>{pending=null;void refresh();},80);},
       state:st=>{connection=st;if(st==='revoked'){current()?.stop();listening=false;void refresh();}render();syncAudio();},
       poll:async()=>{await refresh();await loadChat();},
     });

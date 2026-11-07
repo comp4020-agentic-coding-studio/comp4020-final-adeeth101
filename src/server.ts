@@ -165,7 +165,7 @@ const server = createServer(async (req, res) => {
       return ok(result,201);
     }
     if(path === '/api/projects' && method === 'GET')return ok({projects:myProjects(visitor),deleted:deletedProjects(visitor)});
-    if(path === '/api/discover' && method === 'GET')return ok({projects:publicProjects(Number(url.searchParams.get('page')??0))});
+    if(path === '/api/discover' && method === 'GET')return ok({projects:publicProjects(visitor,Number(url.searchParams.get('page')??0))});
     if(path === '/api/live' && method === 'GET')return ok({performances:livePerformances(Number(url.searchParams.get('page')??0))});
     if(path === '/api/presets' && method === 'GET')return json(res,200,{packs:PACKS},{'cache-control':'no-cache'});
     if(path === '/api/import' && method === 'POST')return ok(importProject(visitor,await readJson(req,512*1024)),201);

@@ -86,10 +86,11 @@ export function myProjects(v:Visitor){
 export function deletedProjects(v:Visitor){
   return rows(`select p.id,p.title,p.deleted_at as deletedAt from project_member m join project p on p.id=m.project_id where m.visitor_id=? and m.role='owner' and m.removed_at is null and p.deleted_at is not null order by p.deleted_at desc limit 50`,v.id);
 }
-export function publicProjects(page:number){
+export function publicProjects(v:Visitor,page:number){
   const offset=Math.max(0,Math.floor(page))*24;
-  return rows(`select p.id,p.title,p.updated_at as updatedAt,(select count(*) from track t where t.project_id=p.id and t.archived_at is null and t.guest_performance_id is null) as parts
-    from project p where p.visibility='public' and p.deleted_at is null order by p.updated_at desc limit 25 offset ?`,offset);
+  return rows(`select p.id,p.title,p.updated_at as updatedAt,(select count(*) from track t where t.project_id=p.id and t.archived_at is null and t.guest_performance_id is null) as parts,
+    exists(select 1 from project_member m where m.project_id=p.id and m.visitor_id=? and m.role='owner' and m.removed_at is null) as yours
+    from project p where p.visibility='public' and p.deleted_at is null order by p.updated_at desc limit 25 offset ?`,v.id,offset);
 }
 
 // --- plans ----------------------------------------------------------------
@@ -252,13 +253,13 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
   const version=(row:Row,key='revision')=>{if(expected!==undefined&&row[key]!==expected)throw new CommandError('This changed in another session. Your draft is safe.',409,row);};
   const plan=(edit?:(p:Plan)=>void)=>{effectiveCycle=updatePlan(id,one('select * from transport where project_id=?',id)!,settings.bpm,edit);audience=true;view=true;};
   const host=()=>need(isHost,hostId?`${handleOf(hostId)} is hosting. Ask them, or wait for the host role to free up.`:'Take the host role first.',403);
-  const part=(trackId:unknown,allowGuest=false)=>{const tr=one('select * from track where id=? and project_id=?',trackId,id);need(tr,'That part is not in this mix.',404);if(!allowGuest)need(!tr!.guest_performance_id,'Guest parts belong to their performer. Use Keep in project to save a copy.',403);return tr!;};
-  const free=(tr:Row)=>{const l=leaseOf(tr.id);if(l&&l.visitorId!==v.id)throw new CommandError(`${l.handle} is editing this part. Duplicate it, ask in chat, or try again when they finish.`,409,{lease:l});};
-  const capacity=()=>need(Number(one('select count(*) as n from track where project_id=? and archived_at is null',id)!.n)<ROOM_LIMITS.parts,`This mix has room for ${ROOM_LIMITS.parts} parts. Remove one to add another.`,409);
+  const part=(trackId:unknown,allowGuest=false)=>{const tr=one('select * from track where id=? and project_id=?',trackId,id);need(tr,'That track is not in this mix.',404);if(!allowGuest)need(!tr!.guest_performance_id,'Guest tracks belong to their performer. Use Keep in the mix to save a copy.',403);return tr!;};
+  const free=(tr:Row)=>{const l=leaseOf(tr.id);if(l&&l.visitorId!==v.id)throw new CommandError(`${l.handle} is editing this track. Duplicate it, ask in chat, or try again when they finish.`,409,{lease:l});};
+  const capacity=()=>need(Number(one('select count(*) as n from track where project_id=? and archived_at is null',id)!.n)<ROOM_LIMITS.parts,`The stage holds ${ROOM_LIMITS.parts} characters. Remove one to add another.`,409);
   const touchTrack=(tr:Row)=>{run('update track set revision=revision+1 where id=?',tr.id);entityId=tr.id;entityRevision=tr.revision+1;};
   const writeRevision=(tr:Row,s:Slot,doc:AnyDocument,source:string|null,provenance:Row)=>{
     const c=one('select * from clip where track_id=? and slot=?',tr.id,s);
-    if(expected!==undefined&&(c?.current_revision??0)!==expected)throw new CommandError('Someone saved this part while you were editing. Your draft is safe: keep it, load theirs, or save yours as a new part.',409,{clip:c?{revision:c.current_revision}:null});
+    if(expected!==undefined&&(c?.current_revision??0)!==expected)throw new CommandError('Someone saved this track while you were editing. Your draft is safe: keep it, load theirs, or save yours as a new track.',409,{clip:c?{revision:c.current_revision}:null});
     const revision=(c?.current_revision??0)+1,schema=doc.schemaVersion;
     let clipId=c?.id as string|undefined;
     if(c)run('update clip set current_revision=? where id=?',revision,c.id);
@@ -281,7 +282,7 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
     // A saved sound is a saved character under an older name.
     const saved=typeof p.characterId==='string'?p.characterId:typeof p.soundId==='string'?p.soundId:null;
     if(saved){const c=characterForPart(v,saved);return {...c,presetId:null,presetVersion:null};}
-    const source=code(p.source),name=text(p.name??'My part',40,'the part a name');parseSource(source);
+    const source=code(p.source),name=text(p.name??'My track',40,'the track a name');parseSource(source);
     return {name,role:(ROLES as readonly string[]).includes(p.role)?p.role:null,presetId:null,presetVersion:null,source,look:validLook(p.look),characterId:null,provenance:{via:'code'}};
   };
   switch(type){
@@ -296,7 +297,7 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
       break;
     }
     case 'part.edit':case 'part.swap':case 'part.restore':{
-      const tr=part(payload.trackId),s=slot(payload.slot??'A');need(!tr.archived_at,'Bring this part back first.',409);free(tr);claimEditing(id,v);
+      const tr=part(payload.trackId),s=slot(payload.slot??'A');need(!tr.archived_at,'Bring this track back first.',409);free(tr);claimEditing(id,v);
       if(type==='part.edit'){
         const source=code(payload.source),doc=parseSource(source).document;
         writeRevision(tr,s,doc,source,{via:payload.via==='shape'?'shape':'code',...(tr.preset_id?{basedOn:{preset:tr.preset_id,version:tr.preset_version}}:{})});
@@ -312,16 +313,16 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
     }
     case 'part.mix':{
       const tr=part(payload.trackId,true);version(tr);
-      if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest parts belong to their performer.',403);
+      if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest tracks belong to their performer.',403);
       const current=(plansFor(id,t.generation).at(-1)?.mix[tr.id])??{gain:0.7,mute:false};
       const gain=payload.gain===undefined?current.gain:payload.gain,mute=payload.mute===undefined?current.mute:payload.mute;
       need(typeof gain==='number'&&Number.isFinite(gain)&&gain>=0&&gain<=1&&typeof mute==='boolean','Volume is 0–1 and mute is on or off.');
       touchTrack(tr);plan(p=>{p.mix[tr.id]={gain,mute};});break;
     }
-    case 'part.rename':{const tr=part(payload.trackId);version(tr);run('update track set name=? where id=?',text(payload.name,40,'the part a name'),tr.id);touchTrack(tr);view=true;audience=true;break;}
+    case 'part.rename':{const tr=part(payload.trackId);version(tr);run('update track set name=? where id=?',text(payload.name,40,'the track a name'),tr.id);touchTrack(tr);view=true;audience=true;break;}
     case 'part.remove':{const tr=part(payload.trackId);version(tr);free(tr);run('update track set archived_at=? where id=?',now,tr.id);leases.delete(tr.id);touchTrack(tr);plan();break;}
     case 'part.look':{
-      const tr=part(payload.trackId,true);if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest parts belong to their performer.',403);
+      const tr=part(payload.trackId,true);if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest tracks belong to their performer.',403);
       version(tr);const look=validLook(payload.look);need(look,'That look is not one Ensemble can draw.');
       run('update track set look_json=? where id=?',JSON.stringify(look),tr.id);touchTrack(tr);view=true;audience=true;break;
     }
@@ -332,11 +333,11 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
       need(owner||tr.owner_id===v.id,'Only the mix’s owner or the person who added this track can delete it.',403);
       purgeTrack(tr.id);entityId=tr.id;break;
     }
-    case 'part.return':{const tr=part(payload.trackId);need(tr.archived_at,'That part is already in the mix.',409);capacity();run('update track set archived_at=null where id=?',tr.id);touchTrack(tr);plan();break;}
+    case 'part.return':{const tr=part(payload.trackId);need(tr.archived_at,'That track is already in the mix.',409);capacity();run('update track set archived_at=null where id=?',tr.id);touchTrack(tr);plan();break;}
     case 'part.duplicate':case 'part.keep':{
       const tr=part(payload.trackId,type==='part.keep');capacity();claimEditing(id,v);
-      if(type==='part.keep')need(tr.guest_performance_id,'Only guest parts need keeping.',409);
-      const c=one("select r.*,c.slot from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where c.track_id=? and c.slot=?",tr.id,payload.slot??'A');need(c,'That part has no saved sound to copy.',404);
+      if(type==='part.keep')need(tr.guest_performance_id,'Only guest tracks need keeping.',409);
+      const c=one("select r.*,c.slot from clip c join clip_revision r on r.clip_id=c.id and r.revision=c.current_revision where c.track_id=? and c.slot=?",tr.id,payload.slot??'A');need(c,'That track has no saved sound to copy.',404);
       const doc=validateAny(JSON.parse(c!.document_json)),source=sourceOf(doc,c!.source_text);
       const provenance=type==='part.keep'?{keptBy:v.handle,fromPerformance:tr.guest_performance_id}:{duplicatedFrom:{part:tr.name,by:handleOf(tr.owner_id)}};
       newPart(type==='part.keep'?tr.name:`${tr.name} copy`.slice(0,40),tr.role,tr.preset_id,tr.preset_version,source,provenance,type==='part.keep'?tr.owner_id:v.id,null,lookOf(tr),tr.character_id??null);
@@ -348,13 +349,13 @@ function apply(v:Visitor,a:ProjectAccess,type:string,payload:any,expected:unknow
     }
     case 'scene.assign':{const tr=part(payload.trackId);version(tr);run('update scene_assignment set clip_slot=? where project_id=? and scene=? and track_id=?',payload.clipSlot===null?null:slot(payload.clipSlot),id,slot(payload.scene),tr.id);touchTrack(tr);plan();break;}
     case 'part.lease':{
-      const tr=part(payload.trackId,true);if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest parts belong to their performer.',403);
+      const tr=part(payload.trackId,true);if(tr.guest_performance_id)need(tr.owner_id===v.id,'Guest tracks belong to their performer.',403);
       free(tr);claimEditing(id,v);const had=leaseOf(tr.id);leases.set(tr.id,{visitorId:v.id,handle:handleOf(v.id),until:now+ROOM_LIMITS.leaseMs,projectId:id});
       entityId=tr.id;changed=!had;break;
     }
     case 'part.release':{
       const tr=part(payload.trackId,true),l=leaseOf(tr.id);entityId=tr.id;
-      if(l&&l.visitorId!==v.id)need(owner&&payload.force===true,`${l.handle} is editing this part.`,403);
+      if(l&&l.visitorId!==v.id)need(owner&&payload.force===true,`${l.handle} is editing this track.`,403);
       changed=!!l;leases.delete(tr.id);break;
     }
     case 'project.rename':{run('update project set title=? where id=?',text(payload.title,60,'the mix a name'),id);entityId=id;view=true;audience=true;break;}
@@ -541,17 +542,17 @@ export function importProject(v:Visitor,input:Row){
   limit(`create:${v.id}`,10,0.2,'You are starting mixes very quickly. Try again shortly.');
   const stream=input.format==='stream'&&input.schemaVersion===1,ensemble=input.format==='ensemble'&&input.schemaVersion===2;
   need(stream||ensemble,'This is not an Ensemble or Stream project file.');
-  const list=(stream?input.tracks:input.parts) as Row[];need(Array.isArray(list)&&list.length<=24,'A project file holds at most 24 parts.');
+  const list=(stream?input.tracks:input.parts) as Row[];need(Array.isArray(list)&&list.length<=24,'A project file holds at most 24 tracks.');
   const title=text(input.title,60,'the mix a name');need(Number.isInteger(input.settings?.bpm)&&input.settings.bpm>=60&&input.settings.bpm<=180,'Invalid tempo.');
   const arr=arrangement(input.settings?.arrangement);
   return tx(after=>{
     const id=newProject(v,title),mapping:Record<string,string>={},now=Date.now();
     list.forEach((raw,i)=>{
-      need(raw&&typeof raw==='object'&&raw.clips&&typeof raw.clips==='object'&&Object.keys(raw.clips).length<=4,'Each part has at most four clip slots.');
+      need(raw&&typeof raw==='object'&&raw.clips&&typeof raw.clips==='object'&&Object.keys(raw.clips).length<=4,'Each track has at most four clip slots.');
       const trackId=randomUUID();mapping[String(raw.id??i)]=trackId;
       // Parts beyond the twelve-part limit arrive removed, not dropped.
       const importedLook=validLook(raw.look);
-      run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,look_json) values(?,?,?,?,?,1,?,?,?,?,?)',trackId,id,v.id,text(raw.name,40,'each part a name'),i,i>=ROOM_LIMITS.parts?now:null,(ROLES as readonly string[]).includes(raw.role)?raw.role:null,typeof raw.presetId==='string'?raw.presetId:null,Number.isInteger(raw.presetVersion)?raw.presetVersion:null,importedLook?JSON.stringify(importedLook):null);
+      run('insert into track(id,project_id,owner_id,name,position,revision,archived_at,role,preset_id,preset_version,look_json) values(?,?,?,?,?,1,?,?,?,?,?)',trackId,id,v.id,text(raw.name,40,'each track a name'),i,i>=ROOM_LIMITS.parts?now:null,(ROLES as readonly string[]).includes(raw.role)?raw.role:null,typeof raw.presetId==='string'?raw.presetId:null,Number.isInteger(raw.presetVersion)?raw.presetVersion:null,importedLook?JSON.stringify(importedLook):null);
       for(const [s,c] of Object.entries(raw.clips) as [string,Row][]){
         slot(s);let doc:AnyDocument,source:string|null=c.source??null;
         if(c.document?.schemaVersion===2){need(typeof source==='string','Expression parts carry their source.');doc=parseSource(source!).document;}

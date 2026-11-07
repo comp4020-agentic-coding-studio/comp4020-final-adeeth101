@@ -40,11 +40,11 @@ export class GuestEditor {
         await hooks.preview(this.draft.source,this.part.id);this.previewId=this.part.id;this.renderState();return;
       }
       if(action==='load'){
-        if(this.dirty()&&!confirm('Replace this local draft with the current saved part? Copy it first if you want to keep it.'))return;
+        if(this.dirty()&&!confirm('Replace this local draft with the current saved track? Copy it first if you want to keep it.'))return;
         const part=this.parts.find(p=>p.id===this.part?.id);if(!part)return;
         this.part=part;this.draft=this.fromPart(part);this.conflict=false;this.pending=null;this.stopPreview();this.store();this.render();return;
       }
-      if(action==='keep'){this.notice='Your draft is kept on this device. Load current or save it as a new part to resolve the conflict.';this.store();this.renderState();return;}
+      if(action==='keep'){this.notice='Your draft is kept on this device. Load current or save it as a new track to resolve the conflict.';this.store();this.renderState();return;}
       if(action==='apply'){await this.apply(false);return;}
       if(action==='new'){await this.apply(true);return;}
     });
@@ -110,21 +110,21 @@ export class GuestEditor {
       const state=shapeState(source,ctl),[min,max]=CONTROL_RANGE[ctl],value=state.value??DEFAULT[ctl];
       return `<div class="shape-row"><label for="guest-shape-${ctl}">${LABEL[ctl]}</label><div class="shape-input"><input id="guest-shape-${ctl}" type="range" data-guest-shape="${ctl}" data-available="${state.available}" min="${min}" max="${max}" step="${ctl==='lpf'?10:0.01}" value="${value}" ${state.available?'':'disabled'}><output>${value}${ctl==='lpf'?' Hz':ctl==='release'?' s':''}</output></div>${state.reason?`<p class="small muted">${esc(state.reason)}</p>`:''}</div>`;
     }).join('');
-    this.dialog.innerHTML=`<header class="drawer-head"><div><h2 id="guest-editor-title">${esc(this.part.name)}</h2><p class="small muted">Your part · this performance only</p></div><button class="ghost close" data-guest-action="close" aria-label="Close guest editor">✕</button></header>
-      <div class="tabs" role="tablist" aria-label="Guest part views"><button role="tab" id="guest-code-tab" data-guest-action="tab" data-tab="code" aria-controls="guest-code-panel" aria-selected="${this.tab==='code'}">Code</button><button role="tab" id="guest-shape-tab" data-guest-action="tab" data-tab="shape" aria-controls="guest-shape-panel" aria-selected="${this.tab==='shape'}">Shape</button></div>
+    this.dialog.innerHTML=`<header class="drawer-head"><div><h2 id="guest-editor-title">${esc(this.part.name)}</h2><p class="small muted">Your track · this performance only</p></div><button class="ghost close" data-guest-action="close" aria-label="Close guest editor">✕</button></header>
+      <div class="tabs" role="tablist" aria-label="Guest track views"><button role="tab" id="guest-code-tab" data-guest-action="tab" data-tab="code" aria-controls="guest-code-panel" aria-selected="${this.tab==='code'}">Code</button><button role="tab" id="guest-shape-tab" data-guest-action="tab" data-tab="shape" aria-controls="guest-shape-panel" aria-selected="${this.tab==='shape'}">Shape</button></div>
       <div id="guest-code-panel" role="tabpanel" aria-labelledby="guest-code-tab" ${this.tab==='code'?'':'hidden'}><label for="guest-code">Strudel code</label><textarea id="guest-code" class="code-editor" spellcheck="false" autocapitalize="off" aria-describedby="guest-code-status">${esc(source)}</textarea><p class="small muted">Use s(), note().s(), stack() and supported Strudel effects. Your text is parsed, never executed as JavaScript.</p></div>
       <div id="guest-shape-panel" role="tabpanel" aria-labelledby="guest-shape-tab" ${this.tab==='shape'?'':'hidden'}>${shapes}</div>
       <p id="guest-code-status" class="code-error" role="status" aria-live="polite"></p>
-      <div id="guest-conflict" class="conflict" role="alert" hidden><strong>This part changed in another tab.</strong><p>Your draft is still here.</p><div class="row"><button class="outline" data-guest-action="keep">Keep my draft</button><button class="ghost" data-guest-action="load">Load current</button><button class="ghost" data-guest-action="new">Save as new part</button></div></div>
+      <div id="guest-conflict" class="conflict" role="alert" hidden><strong>This track changed in another tab.</strong><p>Your draft is still here.</p><div class="row"><button class="outline" data-guest-action="keep">Keep my draft</button><button class="ghost" data-guest-action="load">Load current</button><button class="ghost" data-guest-action="new">Save as new track</button></div></div>
       <div class="row code-actions"><button class="outline" data-guest-action="preview">Preview on my device</button><button class="primary" data-guest-action="apply">Apply to mix</button><button class="ghost" data-guest-action="load">Restore previous</button><button class="ghost" data-guest-action="copy">Copy draft</button></div>`;
     this.renderState();
   }
   private renderState(){
     if(!this.part||!this.draft)return;
     const present=this.parts.some(p=>p.id===this.part?.id),editable=this.available&&present&&!this.saving;
-    const unavailable=!this.available?this.reason:!present?'This part was removed. Your draft is kept on this device; you can copy it.':'';
+    const unavailable=!this.available?this.reason:!present?'This track was removed. Your draft is kept on this device; you can copy it.':'';
     const status=this.dialog.querySelector<HTMLElement>('#guest-code-status');
-    if(status){status.textContent=unavailable||this.error||this.notice||(this.previewId?'Previewing locally · only you hear this.':this.dirty()?'Draft saved on this device · not shared yet.':`Saved revision ${this.draft.baseRevision} · everyone hears the saved part.`);status.classList.toggle('error',!!this.error);}
+    if(status){status.textContent=unavailable||this.error||this.notice||(this.previewId?'Previewing locally · only you hear this.':this.dirty()?'Draft saved on this device · not shared yet.':`Saved revision ${this.draft.baseRevision} · everyone hears the saved track.`);status.classList.toggle('error',!!this.error);}
     const code=this.dialog.querySelector<HTMLTextAreaElement>('#guest-code');if(code)code.readOnly=!editable;
     for(const input of this.dialog.querySelectorAll<HTMLInputElement>('[data-guest-shape]'))input.disabled=!editable||input.dataset.available!=='true';
     for(const button of this.dialog.querySelectorAll<HTMLButtonElement>('[data-guest-action]')){

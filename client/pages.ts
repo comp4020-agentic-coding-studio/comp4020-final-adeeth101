@@ -1,29 +1,56 @@
 // Play (home), Live now, public mixes, Friends and invitation landing pages.
 import {request,type ApiError} from './api.ts';
-import {esc,$,toast,fail,errorText,on,ago,visibilityLabel} from './ui.ts';
+import {esc,$,toast,fail,errorText,on,ago,visibilityLabel,confirmDialog} from './ui.ts';
+import {characterSvg} from './performer.ts';
+import {presetById} from '../shared/presets.ts';
 import {connect} from './live.ts';
 import {enable} from './sound.ts';
 
+const command=(id:string,type:string,payload:unknown={})=>request(`/api/projects/${id}/commands`,{commandId:crypto.randomUUID(),type,payload});
+const HERO_BAND=['bot-flip','arcade-engine','sun-afterglow','rain-upright','sea-song'];
 export async function mountHome(host:HTMLElement){
   const list=$('#home-lists',host)!;
+  const band=$('#hero-band',host);if(band)band.innerHTML=HERO_BAND.map(id=>characterSvg(presetById(id)!.look)).join('');
   const form=$<HTMLFormElement>('.start-form',host);
   form?.addEventListener('submit',e=>{e.preventDefault();const b=form.querySelector('button')!;b.disabled=true;void request('/api/projects',{}).then(x=>location.href=`/p/${x.id}?new=1`).catch(err=>{b.disabled=false;fail(err);});});
-  try{
-    const [{projects},live]=await Promise.all([request('/api/projects'),request('/api/live').catch(()=>({performances:[]}))]);
-    list.innerHTML=`<section class="your-projects"><h2>Your mixes</h2>${projects.length?`<ul class="project-list">${projects.map((p:any)=>`<li><a class="project-card" href="/p/${esc(p.id)}"><strong>${esc(p.title)}</strong><span class="small muted">${p.parts} part${p.parts===1?'':'s'} · ${p.members} ${p.members===1?'person':'people'} · ${visibilityLabel[p.visibility]} · ${ago(p.updatedAt)}</span></a></li>`).join('')}</ul>`:'<p class="empty-state">No mixes yet. Start one: you get an empty stage and a tray of sounds to give your performers. Invite friends once you have something going.</p>'}</section>
+  let projects:any[]=[],deleted:any[]=[];
+  const item=(p:any)=>`<li class="project-item"><a class="project-card" href="/p/${esc(p.id)}"><strong>${esc(p.title)}</strong><span class="small muted">${p.parts} character${p.parts===1?'':'s'} · ${p.members} ${p.members===1?'person':'people'} · ${visibilityLabel[p.visibility]} · ${ago(p.updatedAt)}</span></a>
+    <div class="project-actions">${p.role==='owner'?`${p.visibility==='public'?`<button class="ghost small" data-act="unlist" data-id="${esc(p.id)}" aria-label="Stop listing ${esc(p.title)} publicly">Stop listing</button>`:''}<button class="ghost small" data-act="delete" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title)}">Delete</button>`:`<button class="ghost small" data-act="leave" data-id="${esc(p.id)}" aria-label="Leave ${esc(p.title)}">Leave</button>`}</div></li>`;
+  async function draw(){
+    const [mine,live]=await Promise.all([request('/api/projects'),request('/api/live').catch(()=>({performances:[]}))]);
+    projects=mine.projects;deleted=mine.deleted??[];
+    list.innerHTML=`<section class="your-projects"><h2>Your mixes</h2>${projects.length?`<ul class="project-list">${projects.map(item).join('')}</ul>`:'<p class="empty-state">No mixes yet. Start one: you get an empty stage and a cast of characters to bring on. Invite friends once you have something going.</p>'}</section>
+      ${deleted.length?`<section><h2>Recently deleted</h2><p class="small muted">Only you can see these. Nobody else can open them.</p><ul class="invite-list">${deleted.map((p:any)=>`<li><strong>${esc(p.title)}</strong> <span class="small muted">deleted ${ago(p.deletedAt)}</span><span class="row-actions"><button class="outline small" data-act="restore" data-id="${esc(p.id)}" aria-label="Restore ${esc(p.title)}">Restore</button><button class="danger small" data-act="purge" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title)} forever">Delete forever</button></span></li>`).join('')}</ul></section>`:''}
       ${live.performances.length?`<section><h2>Live now</h2><p><a href="/live">${live.performances.length} performance${live.performances.length===1?'':'s'} live →</a></p></section>`:''}
-      <p class="small"><a href="/discover">Browse public mixes</a> · <a href="/friends">Friends and your profile</a></p>`;
-  }catch(e){list.innerHTML=`<p class="notice">${esc(errorText(e))}</p>`;}
+      <p class="small"><a href="/characters">Your characters</a> · <a href="/discover">Browse public mixes</a> · <a href="/friends">Friends and your profile</a></p>`;
+  }
+  const named=(id:string)=>[...projects,...deleted].find(p=>p.id===id);
+  on(host,'click','[data-act]',async b=>{
+    const act=b.dataset.act,id=b.dataset.id!,p=named(id);if(!p)return;
+    if(act==='delete'){
+      if(!(await confirmDialog({title:`Delete ${p.title}?`,body:`It disappears for all ${p.members} ${p.members===1?'person':'people'} in it. A live performance ends, and invitations and shared links stop working. You can restore it here afterwards.`,confirm:'Delete mix',danger:true,typed:p.title})))return;
+      await command(id,'project.delete',{confirmTitle:p.title});toast(`${p.title} deleted. Restore it below if you change your mind.`);
+    }
+    if(act==='leave'){if(!(await confirmDialog({title:`Leave ${p.title}?`,body:'It leaves your list. The mix and everything you added stay with the group, and you’ll need a new invitation to come back.',confirm:'Leave mix'})))return;await command(id,'member.leave');toast(`You left ${p.title}.`);}
+    if(act==='unlist'){if(!(await confirmDialog({title:`Stop listing ${p.title}?`,body:'It leaves Public mixes and becomes private. Members keep it, and the music is untouched.',confirm:'Make private'})))return;await command(id,'project.visibility',{visibility:'private'});toast(`${p.title} is private now.`);}
+    if(act==='restore'){await request(`/api/projects/${id}/restore`,{});toast(`${p.title} is back, as a private mix. Old invitations and links stay cancelled.`);}
+    if(act==='purge'){if(!(await confirmDialog({title:`Delete ${p.title} forever?`,body:'Its music, history and chat are removed for good. This can’t be undone. Saved characters aren’t affected.',confirm:'Delete forever',danger:true,typed:p.title})))return;await request(`/api/projects/${id}/purge`,{confirmTitle:p.title});toast(`${p.title} is gone.`);}
+    await draw();
+  });
+  try{await draw();}catch(e){list.innerHTML=`<p class="notice">${esc(errorText(e))}</p>`;}
 }
 
 export async function mountDiscover(host:HTMLElement){
-  let page=0;
+  let page=0,projects:any[]=[];
   async function draw(){
-    const {projects}=await request(`/api/discover?page=${page}`);
-    host.innerHTML=`<section class="page"><h1>Public mixes</h1><p class="lede small">Mixes their owners chose to make public. Open one to listen; members edit.</p>${projects.length?`<ul class="project-list">${projects.slice(0,24).map((p:any)=>`<li><a class="project-card" href="/p/${esc(p.id)}"><strong>${esc(p.title)}</strong><span class="small muted">${p.parts} parts · ${ago(p.updatedAt)}</span></a></li>`).join('')}</ul>`:'<p class="empty-state">No public mixes yet.</p>'}
+    projects=(await request(`/api/discover?page=${page}`)).projects;
+    host.innerHTML=`<section class="page"><h1>Public mixes</h1><p class="lede small">Mixes their owners chose to make public. Open one to listen; members edit.</p>${projects.length?`<ul class="project-list">${projects.slice(0,24).map((p:any)=>`<li class="project-item"><a class="project-card" href="/p/${esc(p.id)}"><strong>${esc(p.title)}</strong><span class="small muted">${p.parts} character${p.parts===1?'':'s'} · ${ago(p.updatedAt)}</span></a>${p.yours?`<div class="project-actions"><button class="ghost small" data-act="unlist" data-id="${esc(p.id)}" aria-label="Stop listing ${esc(p.title)}">Stop listing</button></div>`:''}</li>`).join('')}</ul>`:'<p class="empty-state">No public mixes yet.</p>'}
       <div class="row">${page?'<button class="ghost" data-act="prev">Newer</button>':''}${projects.length>24?'<button class="ghost" data-act="next">Older</button>':''}</div></section>`;
   }
-  on(host,'click','[data-act]',async b=>{page+=b.dataset.act==='next'?1:-1;await draw();});
+  on(host,'click','[data-act]',async b=>{
+    if(b.dataset.act==='unlist'){const p=projects.find(x=>x.id===b.dataset.id)!;if(!(await confirmDialog({title:`Stop listing ${p.title}?`,body:'It leaves this page and becomes private. Members keep it, and the music is untouched.',confirm:'Make private'})))return;await command(p.id,'project.visibility',{visibility:'private'});toast(`${p.title} is private now.`);await draw();return;}
+    page+=b.dataset.act==='next'?1:-1;await draw();
+  });
   await draw();
 }
 
@@ -114,7 +141,7 @@ export async function mountInvite(host:HTMLElement,id:string){
     else if(preview.state==='invalid')sessionStorage.removeItem(`invite:${id}`);
   }catch{/* private window: the link still works, a reload just needs it again */}
   const kept=token;
-  const roleText=preview.kind==='project'?'as a <strong>member</strong>: you can add and change parts and chat with the group':'as a <strong>guest performer</strong> for this performance only: you can add your own parts while it is live. It doesn’t make you a member of the mix';
+  const roleText=preview.kind==='project'?'as a <strong>member</strong>: you can add and change characters and chat with the group':'as a <strong>guest performer</strong> for this performance only: you can bring your own characters while it is live. It doesn’t make you a member of the mix';
   host.innerHTML=preview.state==='open'||preview.state==='member'?`<section class="page invite card"><p class="eyebrow">Invitation</p><h1>${esc(preview.from)} invited you to ${preview.kind==='project'?'join':'perform in'} “${esc(preview.title)}”</h1>
       <p>You’d join ${roleText}.</p>${preview.kind==='perform'&&!preview.live?'<p class="notice">This performance has ended.</p>':''}
       ${preview.state==='member'?`<p>You’re already a member.</p><a class="primary" href="/p/${esc(preview.projectId)}">Open the mix</a>`:`<div class="row"><button class="primary big" data-act="accept">Join and enable sound</button><a class="ghost" href="/">Not now</a></div>`}

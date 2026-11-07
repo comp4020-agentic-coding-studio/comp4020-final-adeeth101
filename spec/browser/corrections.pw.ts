@@ -104,7 +104,7 @@ test('a guest customises only their own part, recovers drafts and resolves confl
     const now=(await get(x.audience,`/api/performances/${x.perf}`)).yourParts[0];
     await post(x.audience,`/api/performances/${x.perf}/commands`,{commandId:crypto.randomUUID(),type:'guest.edit',expectedRevision:now.revision,payload:{trackId:own.id,source:'s("hh*4")'}});
     await expect(g.getByRole('alert')).toContainText('changed in another tab');await expect(code).toHaveValue('s("bd*2 cp")');
-    await g.getByRole('button',{name:'Save as new part',exact:true}).click();
+    await g.getByRole('button',{name:'Save as new track',exact:true}).click();
     await expect.poll(async()=>(await get(x.audience,`/api/performances/${x.perf}`)).yourParts.length).toBe(2);
     await expect(g.getByRole('dialog').getByRole('heading')).toContainText('copy');
     await code.fill('s("cp*2")');

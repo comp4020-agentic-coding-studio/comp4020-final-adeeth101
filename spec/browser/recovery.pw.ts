@@ -81,7 +81,7 @@ test('a slow connection still gets a newcomer to sound, and a double Apply saves
   await expect(page.locator('#status-line')).toContainText(/hosting|playing|Stopped/,{timeout:60000});
   await page.getByRole('button',{name:/Add and play/}).first().click({timeout:60000});
   await expect(page.locator('.performer[data-part]')).toHaveCount(1,{timeout:60000});
-  await page.getByRole('button',{name:'Close the sound tray'}).click();
+  await page.getByRole('button',{name:'Close the cast'}).click();
   await page.locator('.performer[data-part] .performer-btn').click();
   await page.getByRole('tab',{name:'Code'}).click();
   await page.locator('#code-editor').fill('s("bd sd")');

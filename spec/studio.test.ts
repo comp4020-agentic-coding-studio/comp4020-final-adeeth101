@@ -19,7 +19,7 @@ it('adds factory presets (twelve parts at most, no per-person cap) and Add and p
   let s=await room(a,id);expect(s.transport.status).toBe('playing');expect(s.parts[0]).toMatchObject({name:'Pocket',role:'beats',presetId:'warm-pocket',presetVersion:1,addedBy:{id:a.id}});
   expect(s.parts[0].clips.A.source).toBe('stack(s("bd ~ bd ~"), s("~ sd ~ sd").gain(0.45), s("hh*8").gain(0.16))');
   for(let i=1;i<12;i++)expect((await act(a,id,'part.add',{presetId:'warm-glow'})).status).toBe(200);
-  const full=await act(a,id,'part.add',{presetId:'warm-glow'});expect(full.status).toBe(409);expect(full.body.error).toMatch(/12 parts/);
+  const full=await act(a,id,'part.add',{presetId:'warm-glow'});expect(full.status).toBe(409);expect(full.body.error).toMatch(/12 characters/);
   s=await room(a,id);expect(s.parts.filter((p:any)=>!p.archivedAt)).toHaveLength(12);
   // A queued change while playing names a bar at least a second ahead.
   const edit=await act(a,id,'part.mix',{trackId:s.parts[1].id,mute:true},s.parts[1].revision);
@@ -51,7 +51,7 @@ it('holds a part for the editor with a lease; others are told who has it and can
   await join(a,b,id);
   expect((await act(b,id,'part.lease',{trackId:pid})).status).toBe(200);
   const blocked=await act(a,id,'part.edit',{trackId:pid,source:'note("60").s("sine")'});
-  expect(blocked.status).toBe(409);expect(blocked.body.error).toMatch(/is editing this part/);
+  expect(blocked.status).toBe(409);expect(blocked.body.error).toMatch(/is editing this track/);
   expect((await room(a,id)).parts[0].lease.visitorId).toBe(b.id);
   const dup=await act(a,id,'part.duplicate',{trackId:pid});expect(dup.status).toBe(200);
   // A member may not take the lease; the owner may release it, which never touches drafts.

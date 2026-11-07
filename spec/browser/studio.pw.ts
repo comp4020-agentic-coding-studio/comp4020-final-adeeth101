@@ -17,7 +17,7 @@ test('start, invite, edit together with code, reopen, go live, listen, chat and 
   await expect(a.getByText('No mixes yet.')).toBeVisible();
   await a.getByRole('button',{name:'Start a mix'}).click();await a.waitForURL(/\/p\/[0-9a-f-]+$/);
   // A fresh mix: empty stage, tray open, no sound until a gesture.
-  await expect(a.getByRole('button',{name:'Add your first performer'})).toBeVisible();
+  await expect(a.getByRole('button',{name:'Add your first character'})).toBeVisible();
   await expect(a.locator('#tray')).toBeVisible();await expect(a.locator('#privacy')).toHaveText('Private');
   expect(await a.locator('.sound-card').count()).toBeLessThanOrEqual(8);
   const first=a.getByRole('button',{name:'Add and play Pocket'});await first.click();
@@ -27,7 +27,7 @@ test('start, invite, edit together with code, reopen, go live, listen, chat and 
   await expect(a.locator('#status-line')).toContainText(/Anchor saved · joining (next bar|bar \d+)/);
   await a.screenshot({path:'.playwright/room-desktop.png'});
   // Invite by link; previewing does not join.
-  await a.getByRole('button',{name:'Close the sound tray'}).click();
+  await a.getByRole('button',{name:'Close the cast'}).click();
   await a.getByRole('button',{name:'Invite'}).click();await a.getByRole('button',{name:'Create link'}).click();
   const link=await a.locator('.link-out').inputValue();await a.keyboard.press('Escape');
   await b.goto(link);await expect(b.getByRole('heading',{level:1})).toContainText('invited you to join');
@@ -35,10 +35,10 @@ test('start, invite, edit together with code, reopen, go live, listen, chat and 
   await b.getByRole('button',{name:'Join and enable sound'}).click();await b.waitForURL(/\/p\//);
   await expect(b.locator('.performer[data-part]')).toHaveCount(2);await expect.poll(async()=>(await snapshot(a)).members.length).toBe(2);
   // B adds a melody from the phone tray, then edits A's bass in code.
-  await b.getByRole('button',{name:'Add a performer'}).click();await b.getByRole('button',{name:'Melody',exact:true}).click();await b.getByRole('button',{name:'Add Sunbeam'}).click();
+  await b.getByRole('button',{name:'Add a character'}).click();await b.getByRole('button',{name:'Melody',exact:true}).click();await b.getByRole('button',{name:'Add Sunbeam'}).click();
   await expect(a.locator('.performer[data-part]')).toHaveCount(3);
   await expect(a.locator('.performer[data-part]').nth(2).locator('.credit')).toContainText((await snapshot(b)).you.handle);
-  await b.getByRole('button',{name:'Close the sound tray'}).click();
+  await b.getByRole('button',{name:'Close the cast'}).click();
   await b.locator('.performer[data-part] .performer-btn').nth(1).click();await b.getByRole('tab',{name:'Code'}).click();
   const code=b.locator('#code-editor');await expect(code).toHaveValue('note("33 ~ 33 40").s("triangle").lpf(850).gain(0.48)');
   await code.fill('note("a1 ~ [a1 c2] e2").s("sawtooth").lpf(700).gain(0.35)');
@@ -88,8 +88,8 @@ test('two tabs of one identity keep a stale draft and choose what happens',async
   await b.locator('#code-editor').fill('s("bd*2 sd")');
   // Meanwhile the first tab saves a newer revision (the lease is the person's, shared by their tabs).
   const s=await snapshot(a);await a.evaluate(async([id,pid,rev])=>{await fetch(`/api/projects/${id}/commands`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({commandId:crypto.randomUUID(),type:'part.edit',payload:{trackId:pid,source:'s("bd sd hh sd")'},expectedRevision:rev})});},[s.id,s.parts[0].id,s.parts[0].clips.A.revision] as const);
-  await expect(b.getByRole('alert')).toContainText('Someone saved this part');await expect(b.getByRole('button',{name:'Apply to mix'})).toBeDisabled();await expect(b.locator('#code-editor')).toHaveValue('s("bd*2 sd")');
-  await b.getByRole('button',{name:'Save as new part'}).click();
+  await expect(b.getByRole('alert')).toContainText('Someone saved this track');await expect(b.getByRole('button',{name:'Apply to mix'})).toBeDisabled();await expect(b.locator('#code-editor')).toHaveValue('s("bd*2 sd")');
+  await b.getByRole('button',{name:'Save as new track'}).click();
   await expect.poll(async()=>(await snapshot(a)).parts.filter((p:any)=>!p.archivedAt).map((p:any)=>p.clips.A.source)).toEqual(['s("bd sd hh sd")','s("bd*2 sd")']);
   await desk.close();
 });
@@ -103,7 +103,7 @@ test('keyboard only at phone size: start, add, open a part, apply Shape, close, 
   await expect(page.locator('#status-line')).toContainText(/hosting|playing|Stopped/);
   const add=page.getByRole('button',{name:'Add and play Pocket'});await add.focus();await page.keyboard.press('Enter');
   await expect(page.locator('.performer[data-part]')).toHaveCount(1);
-  await page.getByRole('button',{name:'Close the sound tray'}).focus();await page.keyboard.press('Enter');
+  await page.getByRole('button',{name:'Close the cast'}).focus();await page.keyboard.press('Enter');
   const performer=page.locator('.performer[data-part] .performer-btn');await performer.focus();await page.keyboard.press('Enter');
   await expect(page.getByRole('tab',{name:'Shape'})).toBeVisible();
   await page.getByRole('tab',{name:'Shape'}).focus();await page.keyboard.press('Enter');
@@ -137,7 +137,7 @@ test('a refused live stream falls back to polling and still saves',async({browse
   for(let i=0;i<3;i++){const p=await ctx.newPage();await p.goto(url);await expect(p.locator('.room')).toBeVisible();tabs.push(p);}
   // Three streams per person and scope; the fourth tab polls instead.
   const fourth=tabs[2];await expect(fourth.locator('#status-line')).toContainText('checking every second',{timeout:15000});
-  await fourth.getByRole('button',{name:'Add your first performer'}).click();await fourth.getByRole('button',{name:/^Add( and play)? Pocket$/}).click();
+  await fourth.getByRole('button',{name:'Add your first character'}).click();await fourth.getByRole('button',{name:/^Add( and play)? Pocket$/}).click();
   await expect.poll(async()=>(await snapshot(first)).parts.length).toBe(1);
   await ctx.close();
 });
@@ -149,7 +149,7 @@ test('an invitation survives a reload, and is still only usable once',async({bro
   await a.goto('/');await a.getByRole('button',{name:'Start a mix'}).click();await a.waitForURL(/\/p\//);
   await a.getByRole('button',{name:/Add and play/}).first().click();
   await expect(a.locator('.performer[data-part]')).toHaveCount(1);
-  await a.getByRole('button',{name:'Close the sound tray'}).click();
+  await a.getByRole('button',{name:'Close the cast'}).click();
   await a.getByRole('button',{name:'Invite'}).click();await a.getByRole('button',{name:'Create link'}).click();
   const link=await a.locator('.link-out').inputValue();await a.keyboard.press('Escape');
   await b.goto(link);
