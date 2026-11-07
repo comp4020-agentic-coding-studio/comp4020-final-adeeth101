@@ -16,7 +16,7 @@ async function route(){
     if(!token)return;
     history.replaceState(null,'',location.pathname);
     try{await request(`/api/projects/${app.dataset.project}/view-link`,{token});location.reload();}
-    catch{app.innerHTML=`<section class="notice-page"><h1>This view link no longer works</h1><p>The owner may have changed it or made the mix private. Ask them for a new link.</p><p><a href="/">Back to Play</a></p></section>`;}
+    catch{app.innerHTML=`<section class="notice-page"><h1>This view link no longer works</h1><p>The owner may have changed it or made the mix private. Ask them for a new link.</p><p><a class="outline" href="/">Back to Play</a></p></section>`;}
     return;
   }
   if(view==='play'){const {mountHome}=await import('./pages.ts');return mountHome(app);}

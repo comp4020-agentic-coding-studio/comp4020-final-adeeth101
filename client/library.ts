@@ -128,7 +128,7 @@ export async function mountCharacter(host:HTMLElement,id:string){
   if(token){await request(`/api/characters/${id}/share-link`,{token}).catch(()=>{});history.replaceState(null,'',location.pathname);}
   let c:SavedCharacter;
   try{c=await request(`/api/characters/${id}`);}
-  catch(e){host.innerHTML=`<section class="notice-page"><h1>This character isn’t available</h1><p>It may be private, its link may have changed, or its owner may have stopped sharing it. ${(e as ApiError).status===404?'Ask them for a new link.':esc(errorText(e))}</p><p><a href="/characters">See shared characters</a></p></section>`;return;}
+  catch(e){host.innerHTML=`<section class="notice-page"><h1>This character isn’t available</h1><p>It may be private, its link may have changed, or its owner may have stopped sharing it. ${(e as ApiError).status===404?'Ask them for a new link.':esc(errorText(e))}</p><p><a class="outline" href="/characters">See shared characters</a></p></section>`;return;}
   document.title=`${c.name} · Character · Ensemble`;
   host.innerHTML=`<section class="page card paper"><div class="char-sheet"><div>${characterSvg(c.look)}</div><div><p class="eyebrow">${esc(roleLabel(c.role))} · ${esc(shareLabel(c))}</p><h1>${esc(c.name)}</h1><p>${creditLine(c)} · ${esc(ago(c.updatedAt))}</p>
     <div class="row"><button class="outline" data-act="hear" id="char-hear">▶ Hear it</button>${c.mine?`<a class="primary" href="/characters">It’s yours: open Characters</a>`:'<button class="primary" data-act="copy">Save a copy</button>'}<button class="outline" data-act="add">Add to a mix</button></div>

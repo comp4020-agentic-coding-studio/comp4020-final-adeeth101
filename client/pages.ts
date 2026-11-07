@@ -21,8 +21,8 @@ export async function mountHome(host:HTMLElement){
     projects=mine.projects;deleted=mine.deleted??[];
     list.innerHTML=`<section class="your-projects"><h2>Your mixes</h2>${projects.length?`<ul class="project-list">${projects.map(item).join('')}</ul>`:'<p class="empty-state">No mixes yet. Start one: you get an empty stage and a cast of characters to bring on. Invite friends once you have something going.</p>'}</section>
       ${deleted.length?`<section><h2>Recently deleted</h2><p class="small muted">Only you can see these. Nobody else can open them.</p><ul class="invite-list">${deleted.map((p:any)=>`<li><strong>${esc(p.title)}</strong> <span class="small muted">deleted ${ago(p.deletedAt)}</span><span class="row-actions"><button class="outline small" data-act="restore" data-id="${esc(p.id)}" aria-label="Restore ${esc(p.title)}">Restore</button><button class="danger small" data-act="purge" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title)} forever">Delete forever</button></span></li>`).join('')}</ul></section>`:''}
-      ${live.performances.length?`<section><h2>Live now</h2><p><a href="/live">${live.performances.length} performance${live.performances.length===1?'':'s'} live →</a></p></section>`:''}
-      <p class="small"><a href="/characters">Your characters</a> · <a href="/discover">Browse public mixes</a> · <a href="/friends">Friends and your profile</a></p>`;
+      ${live.performances.length?`<section><h2>Live now</h2><p><a class="outline" href="/live">${live.performances.length} performance${live.performances.length===1?'':'s'} live →</a></p></section>`:''}
+      <p class="row"><a class="outline small" href="/characters">Your characters</a><a class="outline small" href="/discover">Browse public mixes</a><a class="outline small" href="/friends">Friends and your profile</a></p>`;
   }
   const named=(id:string)=>[...projects,...deleted].find(p=>p.id===id);
   on(host,'click','[data-act]',async b=>{
@@ -146,7 +146,7 @@ export async function mountInvite(host:HTMLElement,id:string){
       <p>You’d join ${roleText}.</p>${preview.kind==='perform'&&!preview.live?'<p class="notice">This performance has ended.</p>':''}
       ${preview.state==='member'?`<p>You’re already a member.</p><a class="primary" href="/p/${esc(preview.projectId)}">Open the mix</a>`:`<div class="row"><button class="primary big" data-act="accept">Join and enable sound</button><a class="ghost" href="/">Not now</a></div>`}
       <p class="small muted">Nothing happens until you choose. Your name here is the one on your profile; you can change it on the Friends page.</p></section>`
-    :`<section class="page invite card"><h1>${preview.state==='invalid'?'This invitation isn’t valid':'This invitation can’t be used'}</h1><p>${esc(preview.message??'Ask the person who sent it for a new one.')}</p><p><a href="/">Go to Play</a></p></section>`;
+    :`<section class="page invite card"><h1>${preview.state==='invalid'?'This invitation isn’t valid':'This invitation can’t be used'}</h1><p>${esc(preview.message??'Ask the person who sent it for a new one.')}</p><p><a class="outline" href="/">Go to Play</a></p></section>`;
   on(host,'click','[data-act="accept"]',async b=>{
     (b as HTMLButtonElement).disabled=true;
     const soundOk=await enable().then(()=>true).catch(()=>false);

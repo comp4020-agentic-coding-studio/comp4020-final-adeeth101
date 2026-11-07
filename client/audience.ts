@@ -18,7 +18,7 @@ export async function mountAudience(host:HTMLElement,id:string){
   if(listen){await request(`/api/performances/${id}/listen-link`,{token:listen}).catch(()=>{});history.replaceState(null,'',location.pathname);}
   let s:AudienceSnapshot;
   try{s=await request(`/api/performances/${id}`);}
-  catch(e){host.innerHTML=`<section class="notice-page"><h1>This performance isn’t available</h1><p>It may have ended, or it needs a listen link. ${(e as ApiError).status===404?'If someone shared it with you, ask them for the link again.':esc(errorText(e))}</p><p><a href="/live">See who’s live</a></p></section>`;return;}
+  catch(e){host.innerHTML=`<section class="notice-page"><h1>This performance isn’t available</h1><p>It may have ended, or it needs a listen link. ${(e as ApiError).status===404?'If someone shared it with you, ask them for the link again.':esc(errorText(e))}</p><p><a class="outline" href="/live">See who’s live</a></p></section>`;return;}
   let listening=false,offset=0,connection:LiveState='reconnecting',messages:any[]=[],full=s.full;
   let liveConnection:ReturnType<typeof connect>|null=null;
   const outbox:{clientId:string;body:string;failed:boolean}[]=[];
@@ -63,7 +63,7 @@ export async function mountAudience(host:HTMLElement,id:string){
       ${live&&you.role==='listener'?`<p>${you.request==='pending'?'<span class="pill">Request sent</span> The host will see it.':you.request==='declined'?'The host declined your request.':'<button class="outline" data-act="request">Ask to perform</button>'}</p>`:''}
       ${live&&you.role==='performer'?guestTools():''}
       ${live&&host2&&s.requests?.length?`<section><h2>Requests to perform</h2><ul class="people">${s.requests.map(r=>`<li>${esc(r.handle)} <button class="primary small" data-act="mod" data-a="accept" data-id="${r.visitorId}">Accept</button><button class="ghost small" data-act="mod" data-a="decline" data-id="${r.visitorId}">Decline</button></li>`).join('')}</ul></section>`:''}
-      ${live&&(host2||you.role==='member')&&s.projectId?`<p class="small"><a href="/p/${esc(s.projectId)}">Back to the mix room</a></p>`:''}`;
+      ${live&&(host2||you.role==='member')&&s.projectId?`<p><a class="outline small" href="/p/${esc(s.projectId)}">Back to the mix room</a></p>`:''}`;
     if(toolsMarkup!==lastTools){$('#aud-tools',host)!.innerHTML=toolsMarkup;lastTools=toolsMarkup;}
     renderChat();
     $<HTMLButtonElement>('#aud-form button',host)!.disabled=!live||you.muted;

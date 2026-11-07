@@ -41,7 +41,7 @@ const hashOf=(s:string)=>{let h=0;for(const c of s)h=(h*31+c.charCodeAt(0))>>>0;
 export async function mountRoom(host:HTMLElement,id:string){
   let state:RoomSnapshot;
   try{state=await request(`/api/projects/${id}`);}
-  catch(e){host.innerHTML=`<section class="notice-page"><h1>This mix isn’t available</h1><p>${esc(errorText(e))}</p><p><a href="/">Back to Play</a></p></section>`;return;}
+  catch(e){host.innerHTML=`<section class="notice-page"><h1>This mix isn’t available</h1><p>${esc(errorText(e))}</p><p><a class="outline" href="/">Back to Play</a></p></section>`;return;}
   // An unlisted view link arrives as #view=<token>: exchanged by POST, then
   // removed from the address bar so it is not kept in history or shared again.
   if((state as unknown as ViewSnapshot).access==='view'){mountView(host,state as unknown as ViewSnapshot);return;}
@@ -356,8 +356,8 @@ export async function mountRoom(host:HTMLElement,id:string){
         ${state.visibility==='unlisted'&&state.viewToken?`<p class="small">View link: <button class="outline small" data-act="copy-view">Copy view link</button> <button class="ghost small" data-act="rotate-view">Make a new link</button></p>`:''}<p class="small muted">Visitors can listen to the saved mix and see credits. Chat, drafts, history and invitations stay with members.</p>`:`<p>${visibilityLabel[state.visibility]} — ${visibilityHelp[state.visibility]} Only the owner can change this.</p>`}</section>
       <section><h3>Tempo</h3><form data-form="tempo" class="row"><label for="tempo">BPM</label><input id="tempo" type="number" min="60" max="180" value="${state.settings.bpm}" ${isHost()&&!playing()?'':'disabled'}><button class="outline" type="submit" ${isHost()&&!playing()?'':'disabled'}>Set</button></form><p class="small muted">${isHost()?playing()?'Stop the mix to change tempo.':'Changes the speed for everyone.':'The host sets the tempo while the mix is stopped.'}</p></section>
       <section><h3>Removed from the stage</h3>${arch.length?`<ul class="invite-list">${arch.map(p=>`<li>${esc(p.name)} <span class="small muted">by ${esc(p.addedBy.handle)}</span><span class="row-actions"><button class="ghost small" data-act="return" data-id="${p.id}" ${active().length<12?'':'disabled'}>Bring back</button>${owner()||p.addedBy.id===you().id?`<button class="danger small" data-act="purge-part" data-id="${p.id}" aria-label="Delete ${esc(p.name)} for good">Delete</button>`:''}</span></li>`).join('')}</ul>`:'<p class="small muted">None.</p>'}</section>
-      <section><h3>Your profile</h3><p class="small">You are <strong>${esc(you().handle)}</strong> <span class="code-tag">#${esc(you().code)}</span>. <a href="/friends">Profile and friends</a></p></section>
-      <section><h3>Files</h3><p class="small"><button class="outline small" data-act="export">Export audio</button> <a href="/api/projects/${esc(id)}/export" download>Download the mix file</a> (members only)</p></section>
+      <section><h3>Your profile</h3><p class="small">You are <strong>${esc(you().handle)}</strong> <span class="code-tag">#${esc(you().code)}</span>.</p><p><a class="outline small" href="/friends">Profile and friends</a></p></section>
+      <section><h3>Files</h3><p class="small"><button class="outline small" data-act="export">Export audio</button> <a class="outline small" href="/api/projects/${esc(id)}/export" download>Download the mix file</a> <span class="small muted">(members only)</span></p></section>
       <section><h3>${owner()?'Delete this mix':'Leave this mix'}</h3>${owner()?`<p class="small muted">Ends any live performance, cancels its invitations and shared links, and removes it for everyone. You can restore it from the Play page.</p><button class="danger" data-act="delete-mix">Delete this mix</button>`:'<p class="small muted">It leaves your list and stays with the group. Your characters stay on stage.</p><button class="danger" data-act="leave">Leave this mix</button>'}</section>`;
   }
 
