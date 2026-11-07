@@ -119,6 +119,32 @@ characters, then `scripts/load-proof.mjs`:
 This shows the caps hold and the machine has room. It does not show that 32 people on
 the Fly machine have a good time.
 
+### On the deployed site
+
+At `93e9aa6`, on the Fly machine, in real Chromium with three separate identities at
+1920×1080 and 390×844, using a private mix, an unlisted performance and an unlisted
+character. A person made a character on the grid, saved and reloaded it, and shared
+it by link; a second identity saved a credited copy and joined by invitation; both
+characters reached the same stage; going live unlisted reached a third identity, who
+got 404 for the project; that identity's reactions appeared on the host's and the
+collaborator's stages; Suggest a build-up and Run sequence reached the audience; a real
+WAV downloaded (1,171 KB, peak 0.646); and the performance ended. No page errors.
+
+| Measure | Observed |
+| --- | --- |
+| One person's change until another browser shows it | Median 1,050 ms, worst 1,522 ms, over 7 samples, including the request itself |
+| Round trip to the machine from where this was run | About 470 ms, with `/healthz` doing 1 ms of work |
+
+That latency is about two and a quarter round trips: the request, the stream's push and
+the snapshot it prompts. This run reached Fly at San Jose and crossed to Sydney, so the
+figure says more about that path than about the app. From Canberra the round trip
+should be far shorter, but that has not been measured, and it is the number the "about
+a second" requirement cares about.
+
+An earlier run of this check is what found the overtaken-refresh fault above, and a
+crash in that run left one private mix and one unlisted character on the live database
+whose owner identity was not saved. Neither can be found or read by anyone.
+
 ### Design directions
 
 See [the design record](design/README.md). Frame rate did not separate the three
@@ -417,6 +443,7 @@ and the v1 limits it protects are still in force for v1 parts.
 - **A real phone.** 4× CPU throttling is a stand-in, not a measurement.
 - **Two devices on a network.** Onset disagreement and output latency between
   machines are unmeasured.
+- **Real-time latency from Canberra.** See the deployed check above.
 - **Idle-stop and next-day return.** The deployed journey and persistence
   across rollout are checked above; a saved mix revisited after a routine
   idle stop and the next day still need their own check.
